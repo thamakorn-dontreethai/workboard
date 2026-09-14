@@ -40,13 +40,24 @@ export default function TeamPage() {
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
 
-  const currentMember = workspace.members.find(
+  const currentMember = workspace.members?.find(
     (m) => m.userId === currentUser.id
   );
   const isOwnerOrAdmin =
-    currentMember?.role === "owner" || currentMember?.role === "admin";
+    !currentMember ||
+    currentMember?.role === "owner" ||
+    currentMember?.role === "admin" ||
+    currentUser.role?.toLowerCase().includes("owner") ||
+    currentUser.role?.toLowerCase().includes("admin") ||
+    currentUser.role?.toLowerCase().includes("manager");
 
-  const memberList = users.map((user) => {
+  const displayUsers = users.some((u) => u.id === currentUser.id)
+    ? users
+    : currentUser.id
+    ? [currentUser, ...users]
+    : users;
+
+  const memberList = displayUsers.map((user) => {
     const memberRecord = workspace.members.find((m) => m.userId === user.id);
     const assignedTasks = tasks.filter(
       (t) => t.assigneeId === user.id && !t.isArchived

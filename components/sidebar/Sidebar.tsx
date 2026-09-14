@@ -354,6 +354,25 @@ export function Sidebar({
               </span>
             )}
           </Link>
+
+          {/* 4. Team & Members */}
+          <Link
+            href="/team"
+            onClick={onItemClick}
+            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              pathname === "/team"
+                ? "bg-[#36384d] text-white font-semibold shadow-xs"
+                : "text-zinc-300 hover:bg-[#232533] hover:text-white"
+            }`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <Users className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+              <span className="truncate">Team & Members</span>
+            </div>
+            <span className="rounded-full bg-emerald-500/20 text-emerald-400 px-1.5 py-0.2 text-[10px] font-bold">
+              {users.length}
+            </span>
+          </Link>
         </div>
       </div>
 
@@ -440,11 +459,11 @@ export function Sidebar({
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <div className="relative flex h-5 w-5 shrink-0 items-center justify-center rounded bg-indigo-600 text-white font-bold text-[10px]">
-                    <span>M</span>
+                    <span>{(workspace.name || "M").charAt(0).toUpperCase()}</span>
                     <span className="absolute -bottom-1 -right-1 text-[7px]">🏠</span>
                   </div>
                   <span className="truncate text-xs font-semibold text-white">
-                    My Team
+                    {workspace.name || "My Team"}
                   </span>
                 </div>
                 <ChevronDown className="h-3.5 w-3.5 text-zinc-400 shrink-0 ml-1" />
@@ -556,83 +575,91 @@ export function Sidebar({
           </div>
         </div>
 
-        {/* 4. Tree Hierarchy: Folders & Boards */}
-        <div className="space-y-1 pt-1">
-          {folders.map((folder) => {
-            const isFolderOpen = openFolders[folder.id] ?? true;
-            const folderBoards = getBoardsForFolder(folder.id);
-
-            return (
-              <div key={folder.id} className="space-y-0.5">
+        {/* 4. Projects / Boards Section */}
+        <div className="space-y-2 pt-1">
+          {boards.length === 0 ? (
+            <div className="p-3 text-center rounded-xl border border-dashed border-zinc-700/60 bg-zinc-900/40 space-y-2">
+              <p className="text-xs text-zinc-300 font-medium">No projects yet</p>
+              <p className="text-[11px] text-zinc-500 leading-relaxed">
+                Create a project to start organizing tasks with your team.
+              </p>
+              <div className="pt-1 flex flex-col gap-1.5">
                 <button
                   type="button"
-                  onClick={() => toggleFolder(folder.id)}
-                  className="flex items-center gap-1.5 py-1 px-1 text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors w-full text-left"
+                  onClick={openCreateBoardModal}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs transition-colors"
                 >
-                  {isFolderOpen ? (
-                    <ChevronDown className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
-                  ) : (
-                    <ChevronRight className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
-                  )}
-                  <span className="truncate">{folder.name}</span>
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Create First Project</span>
                 </button>
-
-                {/* Boards inside folder */}
-                {isFolderOpen && (
-                  <div className="pl-3 space-y-0.5 mt-0.5">
-                    {folderBoards.length === 0 ? (
-                      <div className="px-2.5 py-1.5 text-[11px] text-zinc-500 italic flex items-center justify-between">
-                        <span>Empty folder</span>
-                        <button
-                          type="button"
-                          onClick={openCreateBoardModal}
-                          className="text-emerald-400 hover:text-emerald-300 font-medium not-italic text-[11px]"
-                        >
-                          + Add Board
-                        </button>
-                      </div>
-                    ) : (
-                      folderBoards.map((b) => {
-                        const isActive =
-                          b.href === "/"
-                            ? pathname === "/"
-                            : pathname === b.href;
-                        const Icon = b.icon;
-
-                        return (
-                          <Link
-                            key={b.id}
-                            href={b.href}
-                            onClick={onItemClick}
-                            className={`group flex items-center justify-between rounded-lg px-2.5 py-2 text-xs transition-all ${isActive
-                                ? "bg-[#36384d] text-white font-medium shadow-xs"
-                                : "text-zinc-300 hover:bg-[#232533] hover:text-white"
-                              }`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <Icon
-                                className={`h-3.5 w-3.5 shrink-0 transition-colors ${isActive
-                                    ? "text-white"
-                                    : "text-zinc-400 group-hover:text-zinc-200"
-                                  }`}
-                              />
-                              <span className="truncate">{b.name}</span>
-                            </div>
-
-                            {b.badge && (
-                              <span className="rounded-full bg-amber-500/20 text-amber-400 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
-                                {b.badge}
-                              </span>
-                            )}
-                          </Link>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={openInviteMemberModal}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 hover:text-white text-xs font-medium transition-colors"
+                >
+                  <Users className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>Invite Members</span>
+                </button>
               </div>
-            );
-          })}
+            </div>
+          ) : (
+            <div className="space-y-0.5">
+              <div className="flex items-center justify-between px-1 py-1 text-[11px] font-semibold text-zinc-400">
+                <span>Projects ({boards.length})</span>
+                <button
+                  type="button"
+                  onClick={openCreateBoardModal}
+                  title="Add new project"
+                  className="text-zinc-400 hover:text-white p-0.5 rounded transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {boards.map((b) => {
+                const isActive = pathname === `/board/${b.id}`;
+                const taskCount = tasks.filter((t) => t.boardId === b.id && !t.isArchived).length;
+                return (
+                  <Link
+                    key={b.id}
+                    href={`/board/${b.id}`}
+                    onClick={onItemClick}
+                    className={`group flex items-center justify-between rounded-lg px-2.5 py-2 text-xs transition-all ${
+                      isActive
+                        ? "bg-[#36384d] text-white font-medium shadow-xs"
+                        : "text-zinc-300 hover:bg-[#232533] hover:text-white"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Table
+                        className={`h-3.5 w-3.5 shrink-0 transition-colors ${
+                          isActive
+                            ? "text-blue-400"
+                            : "text-zinc-400 group-hover:text-zinc-200"
+                        }`}
+                      />
+                      <span className="truncate">{b.name}</span>
+                    </div>
+
+                    {taskCount > 0 && (
+                      <span className="rounded-full bg-zinc-800 text-zinc-400 group-hover:text-zinc-200 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
+                        {taskCount}
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
+
+              <button
+                type="button"
+                onClick={openCreateBoardModal}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 mt-1 rounded-lg text-xs text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800/40 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>+ Add Board / Project</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

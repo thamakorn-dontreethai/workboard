@@ -68,6 +68,7 @@ interface WorkBoardContextType {
     password: string;
     role?: string;
     department?: string;
+    teamName?: string;
   }) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   switchUser: (userId: string) => void;
@@ -117,7 +118,7 @@ interface WorkBoardContextType {
     name: string;
     email: string;
     role: "owner" | "admin" | "member" | "viewer";
-  }) => Promise<User | null>;
+  }) => Promise<{ user: User; inviteLink?: string } | null>;
   updateMemberRole: (
     userId: string,
     role: "owner" | "admin" | "member" | "viewer"
@@ -350,8 +351,29 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
             ? users
             : [...users, loggedInUser];
           setUsers(newUsers);
+
+          const isMember = workspace.members.some((m) => m.userId === loggedInUser.id);
+          const userRole = (loggedInUser.role?.toLowerCase().includes("owner") || loggedInUser.role?.toLowerCase().includes("admin") || workspace.members.length === 0)
+            ? ("owner" as const)
+            : ("member" as const);
+          const updatedWorkspace: Workspace = isMember
+            ? workspace
+            : {
+                ...workspace,
+                members: [
+                  ...workspace.members,
+                  {
+                    userId: loggedInUser.id,
+                    workspaceId: workspace.id,
+                    role: userRole,
+                    joinedAt: new Date(),
+                  },
+                ],
+              };
+          setWorkspace(updatedWorkspace);
+
           // Persist auth session to localStorage
-          persistState(newUsers, workspace, tasks, activities, notifications, loggedInUser, groups, boards, true);
+          persistState(newUsers, updatedWorkspace, tasks, activities, notifications, loggedInUser, groups, boards, true);
           return true;
         }
         return false;
@@ -369,22 +391,44 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       password: string;
       role?: string;
       department?: string;
+      teamName?: string;
     }): Promise<{ success: boolean; error?: string }> => {
       try {
         const res = await fetch("/api/auth/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(userData),
+          body: JSON.stringify({
+            ...userData,
+            role: userData.role || "Workspace Owner",
+          }),
         });
         const data = await res.json();
         if (data.success && data.data) {
           const newUser: User = data.data;
           setCurrentUser(newUser);
           setIsAuthenticated(true);
-          const newUsers = [...users, newUser];
+          const newUsers = [...users.filter((u) => u.id !== newUser.id), newUser];
           setUsers(newUsers);
+
+          // Give the registered user ownership of their team
+          const teamTitle = userData.teamName || `${newUser.name}'s Team`;
+          const updatedWorkspace: Workspace = {
+            ...workspace,
+            name: teamTitle,
+            members: [
+              ...workspace.members.filter((m) => m.userId !== newUser.id),
+              {
+                userId: newUser.id,
+                workspaceId: workspace.id,
+                role: "owner",
+                joinedAt: new Date(),
+              },
+            ],
+          };
+          setWorkspace(updatedWorkspace);
+
           // Persist auth session to localStorage
-          persistState(newUsers, workspace, tasks, activities, notifications, newUser, groups, boards, true);
+          persistState(newUsers, updatedWorkspace, tasks, activities, notifications, newUser, groups, boards, true);
           return { success: true };
         }
         return { success: false, error: data.error || "Registration failed" };
@@ -952,24 +996,60 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
           // Dispatch real invitation email for primary board
           const targetBoardId = boards[0]?.id || "board-1";
-          await fetch(`/api/boards/${targetBoardId}/invite`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email: data.email,
-              role: data.role === "admin" ? "Project Lead" : "Member",
-              invitedById: currentUser.id,
-            }),
-          });
+          let inviteLink = "";
+          try {
+            const inviteRes = await fetch(`/api/boards/${targetBoardId}/invite`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                email: data.email,
+                role: data.role === "admin" ? "Project Lead" : "Member",
+                invitedById: currentUser.id,
+              }),
+            });
+            const inviteJson = await inviteRes.json();
+            if (inviteJson?.data?.inviteLink) {
+              inviteLink = inviteJson.data.inviteLink;
+            }
+          } catch (e) {
+            console.warn("Board invite link fallback:", e);
+          }
 
-          return newUser;
+          if (!inviteLink) {
+            const origin = typeof window !== "undefined" ? window.location.origin : "";
+            inviteLink = `${origin}/register?email=${encodeURIComponent(data.email)}&role=${encodeURIComponent(data.role)}`;
+          }
+
+          const updatedWorkspace: Workspace = {
+            ...workspace,
+            members: [
+              ...workspace.members.filter((m) => m.userId !== newUser.id),
+              {
+                userId: newUser.id,
+                workspaceId: workspace.id,
+                role: data.role,
+                joinedAt: new Date(),
+              },
+            ],
+          };
+          setWorkspace(updatedWorkspace);
+          persistState(
+            [...users.filter((u) => u.id !== newUser.id && isRealUser(u)), newUser],
+            updatedWorkspace,
+            tasks,
+            activities,
+            notifications,
+            currentUser
+          );
+
+          return { user: newUser, inviteLink };
         }
       } catch (err) {
         console.error("Failed to create member via API:", err);
       }
       return null;
     },
-    [boards, currentUser.id]
+    [boards, currentUser, workspace, users, tasks, activities, notifications, persistState]
   );
 
   const updateMemberRole = useCallback(
@@ -1195,6 +1275,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       color?: string;
       folderId?: string;
     }): Promise<Board> => {
+      let createdBoard: Board | null = null;
       try {
         const res = await fetch("/api/boards", {
           method: "POST",
@@ -1208,18 +1289,13 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         });
         const result = await res.json();
         if (result?.success && result?.data) {
-          const newBoard: Board = result.data;
-          setBoards((prev) => {
-            if (prev.some((b) => b.id === newBoard.id)) return prev;
-            return [...prev, newBoard];
-          });
-          return newBoard;
+          createdBoard = result.data;
         }
       } catch (err) {
         console.error("Failed to create board on API:", err);
       }
 
-      const fallbackBoard: Board = {
+      const newBoard: Board = createdBoard || {
         id: `board-${Date.now()}`,
         name: data.name,
         description: data.description || "",
@@ -1233,10 +1309,40 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-      setBoards((prev) => [...prev, fallbackBoard]);
-      return fallbackBoard;
+
+      const initialGroup: Group = {
+        id: `group-${Date.now()}`,
+        boardId: newBoard.id,
+        name: "Tasks & Deliverables",
+        color: "#0073ea",
+        order: 0,
+        isCollapsed: false,
+        taskIds: [],
+        createdAt: new Date(),
+      };
+
+      newBoard.groupIds = [initialGroup.id];
+
+      const updatedBoards = [...boards.filter((b) => b.id !== newBoard.id), newBoard];
+      const updatedGroups = [...groups.filter((g) => g.boardId !== newBoard.id), initialGroup];
+
+      setBoards(updatedBoards);
+      setGroups(updatedGroups);
+
+      persistState(
+        users,
+        workspace,
+        tasks,
+        activities,
+        notifications,
+        currentUser,
+        updatedGroups,
+        updatedBoards
+      );
+
+      return newBoard;
     },
-    [currentUser.id, workspace.id]
+    [currentUser, workspace, boards, groups, users, tasks, activities, notifications, persistState]
   );
 
   const getTasksByAssignee = useCallback(
