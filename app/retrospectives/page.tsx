@@ -1,0 +1,13 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+export default function RetroRedirect() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/marketing");
+  }, [router]);
+
+  return null;
+}
