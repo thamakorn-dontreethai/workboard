@@ -68,7 +68,7 @@ interface WorkBoardContextType {
     password: string;
     role?: string;
     department?: string;
-  }) => Promise<boolean>;
+  }) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   switchUser: (userId: string) => void;
 
@@ -369,7 +369,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       password: string;
       role?: string;
       department?: string;
-    }): Promise<boolean> => {
+    }): Promise<{ success: boolean; error?: string }> => {
       try {
         const res = await fetch("/api/auth/register", {
           method: "POST",
@@ -385,11 +385,11 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           setUsers(newUsers);
           // Persist auth session to localStorage
           persistState(newUsers, workspace, tasks, activities, notifications, newUser, groups, boards, true);
-          return true;
+          return { success: true };
         }
-        return false;
-      } catch {
-        return false;
+        return { success: false, error: data.error || "Registration failed" };
+      } catch (err: any) {
+        return { success: false, error: err.message || "Network error" };
       }
     },
     [users, workspace, tasks, activities, notifications, groups, boards, persistState]

@@ -40,14 +40,20 @@ export interface DatabaseSchema {
   invitations?: BoardInvitation[];
 }
 
-const DATA_DIR = path.join(process.cwd(), ".data");
+const DATA_DIR = process.env.VERCEL
+  ? path.join("/tmp", ".data")
+  : path.join(process.cwd(), ".data");
 const DB_FILE = process.env.VITEST
   ? path.join(DATA_DIR, "workboard.test.json")
   : path.join(DATA_DIR, "workboard.json");
 
 function ensureDirectoryExists() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch (err) {
+    // Ignore in read-only environment
   }
 }
 
@@ -120,8 +126,13 @@ export function readDb(): DatabaseSchema {
 }
 
 export function writeDb(data: DatabaseSchema): void {
-  ensureDirectoryExists();
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+  try {
+    ensureDirectoryExists();
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+  } catch (err) {
+    // In serverless environments (Vercel), log warning and continue
+    console.warn("writeDb to local filesystem failed (expected on serverless):", err);
+  }
 }
 
 export function resetDb(): DatabaseSchema {

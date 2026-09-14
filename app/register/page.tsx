@@ -48,17 +48,17 @@ function RegisterForm() {
     setError(null);
 
     try {
-      const success = await register({
+      const res = await register({
         name: name.trim(),
         email: email.trim(),
         password,
         role,
       });
 
-      if (success) {
+      if (res.success) {
         router.push(redirect);
       } else {
-        setError("Registration failed. Please try another email.");
+        setError(res.error || "Registration failed. Please try another email.");
       }
     } catch (err: any) {
       setError(err.message || "Failed to create account. Please try again.");

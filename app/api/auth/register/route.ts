@@ -104,9 +104,15 @@ export async function POST(request: Request) {
       }
     }
 
-    // Save to local file store
-    db.users.push(newUser);
-    writeDb(db);
+    // Save to local file store (safe fallback)
+    try {
+      if (db && Array.isArray(db.users)) {
+        db.users.push(newUser);
+        writeDb(db);
+      }
+    } catch (e) {
+      console.warn("Local db fallback write error:", e);
+    }
 
     // Return sanitized user (without password)
     const { password: _, ...safeUser } = newUser;
