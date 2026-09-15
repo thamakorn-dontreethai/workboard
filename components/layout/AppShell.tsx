@@ -13,6 +13,8 @@ import { InviteBoardMemberModal } from "@/components/board/InviteBoardMemberModa
 import { CreateBoardModal } from "@/components/board/CreateBoardModal";
 import { CreateFolderModal } from "@/components/sidebar/CreateFolderModal";
 import { CreateDashboardModal } from "@/components/dashboard/CreateDashboardModal";
+import { CreateWorkspaceModal } from "@/components/workspace/CreateWorkspaceModal";
+import { BrowseWorkspacesModal } from "@/components/workspace/BrowseWorkspacesModal";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -21,7 +23,7 @@ interface AppShellProps {
 function AppShellInner({ children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { isAuthenticated } = useWorkBoard();
+  const { isAuthenticated, isHydrated } = useWorkBoard();
 
   const isAuthPage =
     pathname === "/login" ||
@@ -29,12 +31,15 @@ function AppShellInner({ children }: AppShellProps) {
     pathname === "/reset" ||
     (pathname?.startsWith("/invite") ?? false);
 
-  // Redirect to login if not authenticated
+  // Redirect to login if not authenticated. Wait for isHydrated first —
+  // isAuthenticated starts false on every mount/refresh until the session
+  // is restored from localStorage, so redirecting before that finishes
+  // would bounce an already-logged-in user straight back to /login.
   useEffect(() => {
-    if (!isAuthenticated && !isAuthPage) {
+    if (isHydrated && !isAuthenticated && !isAuthPage) {
       router.replace("/login");
     }
-  }, [isAuthenticated, isAuthPage, router]);
+  }, [isHydrated, isAuthenticated, isAuthPage, router]);
 
   // Desktop sidebar collapsed state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -158,6 +163,8 @@ function AppShellInner({ children }: AppShellProps) {
       <CreateBoardModal />
       <CreateFolderModal />
       <CreateDashboardModal />
+      <CreateWorkspaceModal />
+      <BrowseWorkspacesModal />
     </div>
   );
 }

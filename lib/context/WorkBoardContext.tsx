@@ -13,6 +13,7 @@ import type {
   Workspace,
   WorkspaceMember,
   Board,
+  BoardPrivacy,
   Group,
   Task,
   Subtask,
@@ -22,11 +23,13 @@ import type {
   TaskStatus,
   TaskPriority,
 } from "@/types";
+import { GROUP_COLOR_PALETTE } from "@/types";
 import {
   MOCK_USERS,
   DEFAULT_USER,
   CURRENT_USER,
   MOCK_WORKSPACE,
+  MOCK_WORKSPACES,
   MOCK_BOARDS,
   MOCK_GROUPS,
   MOCK_TASKS,
@@ -40,6 +43,7 @@ interface WorkBoardContextType {
   currentUser: User;
   users: User[];
   workspace: Workspace;
+  workspaces: Workspace[];
   boards: Board[];
   groups: Group[];
   tasks: Task[];
@@ -48,6 +52,29 @@ interface WorkBoardContextType {
   activities: Activity[];
   notifications: Notification[];
   unreadNotificationCount: number;
+
+  // Multi-Workspace & Management
+  switchWorkspace: (workspaceId: string) => void;
+  createWorkspace: (data: {
+    name: string;
+    description?: string;
+    privacy?: "open" | "closed";
+    avatarColor?: string;
+  }) => Promise<Workspace>;
+  updateWorkspace: (
+    workspaceId: string,
+    updates: Partial<Workspace>
+  ) => Promise<Workspace>;
+  deleteWorkspace: (workspaceId: string) => Promise<boolean>;
+  togglePinWorkspace: (workspaceId: string) => Promise<void>;
+
+  // Workspace Modals
+  isBrowseWorkspacesOpen: boolean;
+  openBrowseWorkspacesModal: () => void;
+  closeBrowseWorkspacesModal: () => void;
+  isCreateWorkspaceOpen: boolean;
+  openCreateWorkspaceModal: () => void;
+  closeCreateWorkspaceModal: () => void;
 
   // Active Modals & SlideOver
   activeTaskId: string | null;
@@ -61,6 +88,7 @@ interface WorkBoardContextType {
 
   // Auth & Session
   isAuthenticated: boolean;
+  isHydrated: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   register: (userData: {
     name: string;
@@ -100,11 +128,16 @@ interface WorkBoardContextType {
     timeline?: { start: string; end: string } | null;
     tags?: string[];
   }) => Task;
+  lastCreatedTaskId: string | null;
+  clearLastCreatedTaskId: () => void;
   deleteTask: (taskId: string) => void;
+  moveTaskToGroup: (taskId: string, newGroupId: string) => void;
   voteItem: (taskId: string) => void;
 
   // Actions - Groups
   addGroup: (boardId: string, name: string, color?: string) => void;
+  updateGroup: (groupId: string, updates: Partial<Pick<Group, "name" | "color">>) => void;
+  reorderGroups: (boardId: string, orderedGroupIds: string[]) => void;
   deleteGroup: (groupId: string) => void;
   toggleGroupCollapse: (groupId: string) => void;
 
@@ -152,6 +185,8 @@ interface WorkBoardContextType {
     description?: string;
     color?: string;
     folderId?: string;
+    privacy?: BoardPrivacy;
+    itemLabel?: string;
   }) => Promise<Board>;
   folders: Array<{ id: string; name: string; color?: string }>;
   createFolder: (name: string, color?: string) => { id: string; name: string; color?: string };
@@ -203,6 +238,7 @@ function isRealUser(u: User): boolean {
 export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User>(DEFAULT_USER);
   const [users, setUsers] = useState<User[]>([]);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>(MOCK_WORKSPACES);
   const [workspace, setWorkspace] = useState<Workspace>(MOCK_WORKSPACE);
   const [boards, setBoards] = useState<Board[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -211,6 +247,14 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  // The most recently created task, so the board table can highlight it and
+  // drop straight into inline title-editing — matches monday.com's "New
+  // item" behavior instead of silently adding a row nobody notices.
+  const [lastCreatedTaskId, setLastCreatedTaskId] = useState<string | null>(null);
+
+  // Workspace Modals State
+  const [isBrowseWorkspacesOpen, setIsBrowseWorkspacesOpen] = useState(false);
+  const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
 
   // Modal State
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -235,6 +279,13 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const [isCreateDashboardOpen, setIsCreateDashboardOpen] = useState(false);
   const [folders, setFolders] = useState<Array<{ id: string; name: string; color?: string }>>([
   ]);
+
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  // True once the localStorage-restore effect below has run at least once.
+  // AppShell must wait for this before deciding to redirect to /login —
+  // otherwise it sees the default isAuthenticated=false on first mount
+  // and bounces an already-logged-in user out before the session is restored.
+  const [isHydrated, setIsHydrated] = useState<boolean>(false);
 
   // ─── Server & LocalStorage Hydration ──────────────────────────────────────
   useEffect(() => {
@@ -263,9 +314,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           }
         }
         // Restore workspace data
+        if (parsed.workspaces && parsed.workspaces.length > 0) {
+          setWorkspaces(parsed.workspaces);
+        }
+        if (parsed.workspace) setWorkspace(parsed.workspace);
         if (parsed.boards) setBoards(parsed.boards);
         if (parsed.groups) setGroups(parsed.groups);
-        if (parsed.workspace) setWorkspace(parsed.workspace);
         if (parsed.tasks) {
           setTasks(
             parsed.tasks.map((t: Task) => ({
@@ -295,10 +349,10 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       }
     } catch {
       // ignore parse errors
+    } finally {
+      setIsHydrated(true);
     }
   }, []);
-
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
   const persistState = useCallback(
     (
@@ -310,7 +364,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       currUser: User,
       newGroups?: Group[],
       newBoards?: Board[],
-      authenticated?: boolean
+      authenticated?: boolean,
+      newWorkspaces?: Workspace[]
     ) => {
       try {
         localStorage.setItem(
@@ -320,6 +375,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
             currentUserId: currUser.id,
             users: newUsers,
             workspace: newWorkspace,
+            workspaces: newWorkspaces || workspaces,
             tasks: newTasks,
             activities: newActivities,
             notifications: newNotifications,
@@ -331,7 +387,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         // ignore
       }
     },
-    [groups, boards]
+    [groups, boards, workspaces]
   );
 
   const login = useCallback(
@@ -816,6 +872,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
       setTasks(updatedTasks);
       setActivities(updatedActivities);
+      setLastCreatedTaskId(newTask.id);
       persistState(
         users,
         workspace,
@@ -837,6 +894,10 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  const clearLastCreatedTaskId = useCallback(() => {
+    setLastCreatedTaskId(null);
+  }, []);
+
   const deleteTask = useCallback(
     (taskId: string) => {
       const updatedTasks = tasks.filter((t) => t.id !== taskId);
@@ -854,20 +915,103 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     [tasks, activeTaskId, users, workspace, activities, notifications, currentUser, persistState]
   );
 
+  const moveTaskToGroup = useCallback(
+    (taskId: string, newGroupId: string) => {
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task || task.groupId === newGroupId) return;
+
+      const newOrder = tasks.filter((t) => t.groupId === newGroupId).length;
+      const updatedTasks = tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, groupId: newGroupId, order: newOrder, updatedAt: new Date() }
+          : t
+      );
+      setTasks(updatedTasks);
+      persistState(
+        users,
+        workspace,
+        updatedTasks,
+        activities,
+        notifications,
+        currentUser
+      );
+    },
+    [tasks, users, workspace, activities, notifications, currentUser, persistState]
+  );
+
   // Group Management
   const addGroup = useCallback(
     (boardId: string, name: string, color?: string) => {
+      const siblingGroups = groups.filter((g) => g.boardId === boardId);
+      // Pick a color that isn't already used by a sibling group on this
+      // board, so newly-created groups don't all end up the same shade.
+      // Falls back to cycling through the palette once every color is taken.
+      const usedColors = new Set(siblingGroups.map((g) => g.color));
+      const nextColor =
+        color ||
+        GROUP_COLOR_PALETTE.find((c) => !usedColors.has(c)) ||
+        GROUP_COLOR_PALETTE[siblingGroups.length % GROUP_COLOR_PALETTE.length];
+
       const newGroup: Group = {
         id: `group-${Date.now()}`,
         boardId,
         name: name.trim() || "New Group",
-        color: color || "#3b82f6",
-        order: groups.filter((g) => g.boardId === boardId).length,
+        color: nextColor,
+        order: siblingGroups.length,
         isCollapsed: false,
         taskIds: [],
         createdAt: new Date(),
       };
       const updatedGroups = [...groups, newGroup];
+      setGroups(updatedGroups);
+      persistState(
+        users,
+        workspace,
+        tasks,
+        activities,
+        notifications,
+        currentUser,
+        updatedGroups
+      );
+    },
+    [groups, users, workspace, tasks, activities, notifications, currentUser, persistState]
+  );
+
+  const updateGroup = useCallback(
+    (groupId: string, updates: Partial<Pick<Group, "name" | "color">>) => {
+      const updatedGroups = groups.map((g) =>
+        g.id === groupId
+          ? {
+              ...g,
+              ...(updates.name !== undefined
+                ? { name: updates.name.trim() || g.name }
+                : {}),
+              ...(updates.color !== undefined ? { color: updates.color } : {}),
+            }
+          : g
+      );
+      setGroups(updatedGroups);
+      persistState(
+        users,
+        workspace,
+        tasks,
+        activities,
+        notifications,
+        currentUser,
+        updatedGroups
+      );
+    },
+    [groups, users, workspace, tasks, activities, notifications, currentUser, persistState]
+  );
+
+  const reorderGroups = useCallback(
+    (boardId: string, orderedGroupIds: string[]) => {
+      const orderIndex = new Map(orderedGroupIds.map((id, index) => [id, index]));
+      const updatedGroups = groups.map((g) =>
+        g.boardId === boardId && orderIndex.has(g.id)
+          ? { ...g, order: orderIndex.get(g.id)! }
+          : g
+      );
       setGroups(updatedGroups);
       persistState(
         users,
@@ -1258,6 +1402,210 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const openCreateDashboardModal = useCallback(() => setIsCreateDashboardOpen(true), []);
   const closeCreateDashboardModal = useCallback(() => setIsCreateDashboardOpen(false), []);
 
+  // Multi-Workspace Modals & Handlers
+  const openBrowseWorkspacesModal = useCallback(() => setIsBrowseWorkspacesOpen(true), []);
+  const closeBrowseWorkspacesModal = useCallback(() => setIsBrowseWorkspacesOpen(false), []);
+
+  const openCreateWorkspaceModal = useCallback(() => setIsCreateWorkspaceOpen(true), []);
+  const closeCreateWorkspaceModal = useCallback(() => setIsCreateWorkspaceOpen(false), []);
+
+  const switchWorkspace = useCallback(
+    (workspaceId: string) => {
+      const target = workspaces.find((w) => w.id === workspaceId);
+      if (target) {
+        const updatedTarget: Workspace = { ...target, lastViewedAt: new Date() };
+        const updatedList = workspaces.map((w) =>
+          w.id === workspaceId ? updatedTarget : w
+        );
+        setWorkspace(updatedTarget);
+        setWorkspaces(updatedList);
+        persistState(
+          users,
+          updatedTarget,
+          tasks,
+          activities,
+          notifications,
+          currentUser,
+          groups,
+          boards,
+          isAuthenticated,
+          updatedList
+        );
+      }
+    },
+    [workspaces, users, tasks, activities, notifications, currentUser, groups, boards, isAuthenticated, persistState]
+  );
+
+  const createWorkspace = useCallback(
+    async (data: {
+      name: string;
+      description?: string;
+      privacy?: "open" | "closed";
+      avatarColor?: string;
+    }): Promise<Workspace> => {
+      let createdWs: Workspace | null = null;
+      try {
+        const res = await fetch("/api/workspaces", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...data,
+            creatorId: currentUser.id,
+          }),
+        });
+        const result = await res.json();
+        if (result?.success && result?.data) {
+          createdWs = result.data;
+        }
+      } catch (err) {
+        console.error("Failed to create workspace on server:", err);
+      }
+
+      const newWs: Workspace = createdWs || {
+        id: `ws-${Date.now()}`,
+        name: data.name,
+        description: data.description || "",
+        plan: "Pro",
+        privacy: data.privacy || "open",
+        avatarColor: data.avatarColor || "bg-indigo-600",
+        isPinned: false,
+        members: [
+          {
+            userId: currentUser.id,
+            workspaceId: `ws-${Date.now()}`,
+            role: "owner",
+            joinedAt: new Date(),
+          },
+        ],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastViewedAt: new Date(),
+      };
+
+      const updatedList = [...workspaces, newWs];
+      setWorkspaces(updatedList);
+      setWorkspace(newWs);
+
+      persistState(
+        users,
+        newWs,
+        tasks,
+        activities,
+        notifications,
+        currentUser,
+        groups,
+        boards,
+        isAuthenticated,
+        updatedList
+      );
+
+      return newWs;
+    },
+    [currentUser, workspaces, users, tasks, activities, notifications, groups, boards, isAuthenticated, persistState]
+  );
+
+  const updateWorkspace = useCallback(
+    async (workspaceId: string, updates: Partial<Workspace>): Promise<Workspace> => {
+      try {
+        await fetch(`/api/workspaces/${workspaceId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        });
+      } catch (err) {
+        console.error("Failed to update workspace on server:", err);
+      }
+
+      const updatedList = workspaces.map((w) =>
+        w.id === workspaceId ? { ...w, ...updates, updatedAt: new Date() } : w
+      );
+      setWorkspaces(updatedList);
+      const updatedCurrent = updatedList.find((w) => w.id === workspace.id) || updatedList[0];
+      setWorkspace(updatedCurrent);
+
+      persistState(
+        users,
+        updatedCurrent,
+        tasks,
+        activities,
+        notifications,
+        currentUser,
+        groups,
+        boards,
+        isAuthenticated,
+        updatedList
+      );
+      return updatedCurrent;
+    },
+    [workspaces, workspace.id, users, tasks, activities, notifications, currentUser, groups, boards, isAuthenticated, persistState]
+  );
+
+  const deleteWorkspace = useCallback(
+    async (workspaceId: string): Promise<boolean> => {
+      if (workspaces.length <= 1) return false;
+      try {
+        await fetch(`/api/workspaces/${workspaceId}`, { method: "DELETE" });
+      } catch (err) {
+        console.error("Failed to delete workspace on server:", err);
+      }
+
+      const updatedList = workspaces.filter((w) => w.id !== workspaceId);
+      setWorkspaces(updatedList);
+      const newActive = updatedList[0];
+      setWorkspace(newActive);
+
+      persistState(
+        users,
+        newActive,
+        tasks,
+        activities,
+        notifications,
+        currentUser,
+        groups,
+        boards,
+        isAuthenticated,
+        updatedList
+      );
+      return true;
+    },
+    [workspaces, users, tasks, activities, notifications, currentUser, groups, boards, isAuthenticated, persistState]
+  );
+
+  const togglePinWorkspace = useCallback(
+    async (workspaceId: string): Promise<void> => {
+      try {
+        await fetch(`/api/workspaces/${workspaceId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "togglePin" }),
+        });
+      } catch (err) {
+        console.error("Failed to toggle pin on server:", err);
+      }
+
+      const updatedList = workspaces.map((w) =>
+        w.id === workspaceId ? { ...w, isPinned: !w.isPinned } : w
+      );
+      setWorkspaces(updatedList);
+      const updatedCurrent = updatedList.find((w) => w.id === workspace.id) || updatedList[0];
+      setWorkspace(updatedCurrent);
+
+      persistState(
+        users,
+        updatedCurrent,
+        tasks,
+        activities,
+        notifications,
+        currentUser,
+        groups,
+        boards,
+        isAuthenticated,
+        updatedList
+      );
+    },
+    [workspaces, workspace.id, users, tasks, activities, notifications, currentUser, groups, boards, isAuthenticated, persistState]
+  );
+
   const createFolder = useCallback((name: string, color?: string) => {
     const newFolder = {
       id: `folder-${Date.now()}`,
@@ -1274,6 +1622,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       description?: string;
       color?: string;
       folderId?: string;
+      privacy?: BoardPrivacy;
+      itemLabel?: string;
     }): Promise<Board> => {
       let createdBoard: Board | null = null;
       try {
@@ -1285,6 +1635,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
             description: data.description || "",
             color: data.color || "#3b82f6",
             ownerId: currentUser.id,
+            workspaceId: workspace.id,
+            privacy: data.privacy || "main",
           }),
         });
         const result = await res.json();
@@ -1295,44 +1647,86 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         console.error("Failed to create board on API:", err);
       }
 
-      const newBoard: Board = createdBoard || {
-        id: `board-${Date.now()}`,
-        name: data.name,
-        description: data.description || "",
-        type: "project",
+      const now = Date.now();
+
+      // Always pin the board to the workspace it was created from
+      const newBoard: Board = {
+        ...(createdBoard || {
+          id: `board-${now}`,
+          name: data.name,
+          description: data.description || "",
+          type: "project",
+          ownerId: currentUser.id,
+          color: data.color || "bg-blue-500",
+          memberIds: [currentUser.id],
+          isArchived: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
         workspaceId: workspace.id,
-        ownerId: currentUser.id,
-        color: data.color || "bg-blue-500",
+        privacy: data.privacy || "main",
         groupIds: [],
-        memberIds: [currentUser.id],
-        isArchived: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
       };
 
-      const initialGroup: Group = {
-        id: `group-${Date.now()}`,
+      // Start like monday.com: two "Group Title" groups holding 3 + 2 starter items
+      const newGroups: Group[] = ["#579bfc", "#a25ddc"].map((color, i) => ({
+        id: `group-${now}-${i}`,
         boardId: newBoard.id,
-        name: "Tasks & Deliverables",
-        color: "#0073ea",
-        order: 0,
+        name: "Group Title",
+        color,
+        order: i,
         isCollapsed: false,
         taskIds: [],
         createdAt: new Date(),
-      };
+      }));
 
-      newBoard.groupIds = [initialGroup.id];
+      const itemLabel = data.itemLabel?.trim() || "Item";
+      const starterStatuses: TaskStatus[] = ["in_progress", "done", "todo", "todo", "todo"];
+      const newTasks: Task[] = starterStatuses.map((status, i) => {
+        const group = newGroups[i < 3 ? 0 : 1];
+        const task: Task = {
+          id: `task-${now}-${i}`,
+          itemCode: `WB-${Math.floor(Math.random() * 900) + 100}`,
+          boardId: newBoard.id,
+          groupId: group.id,
+          title: `${itemLabel} ${i + 1}`,
+          description: "",
+          status,
+          priority: "medium",
+          assigneeId: null,
+          reporterId: currentUser.id,
+          dueDate: new Date(now + (i + 2) * 24 * 60 * 60 * 1000),
+          category: "General",
+          timeline: null,
+          votes: 0,
+          tags: [],
+          subtaskIds: [],
+          commentIds: [],
+          attachmentIds: [],
+          activityIds: [],
+          order: group.taskIds.length,
+          isArchived: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        group.taskIds.push(task.id);
+        return task;
+      });
+
+      newBoard.groupIds = newGroups.map((g) => g.id);
 
       const updatedBoards = [...boards.filter((b) => b.id !== newBoard.id), newBoard];
-      const updatedGroups = [...groups.filter((g) => g.boardId !== newBoard.id), initialGroup];
+      const updatedGroups = [...groups.filter((g) => g.boardId !== newBoard.id), ...newGroups];
+      const updatedTasks = [...newTasks, ...tasks];
 
       setBoards(updatedBoards);
       setGroups(updatedGroups);
+      setTasks(updatedTasks);
 
       persistState(
         users,
         workspace,
-        tasks,
+        updatedTasks,
         activities,
         notifications,
         currentUser,
@@ -1410,11 +1804,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     ).length;
   }, [notifications, currentUser.id]);
 
-  const value = useMemo(
+  const value = useMemo<WorkBoardContextType>(
     () => ({
       currentUser,
       users,
       workspace,
+      workspaces,
       boards,
       groups,
       tasks,
@@ -1423,6 +1818,21 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       activities,
       notifications,
       unreadNotificationCount,
+
+      // Multi-Workspace
+      switchWorkspace,
+      createWorkspace,
+      updateWorkspace,
+      deleteWorkspace,
+      togglePinWorkspace,
+
+      // Workspace Modals
+      isBrowseWorkspacesOpen,
+      openBrowseWorkspacesModal,
+      closeBrowseWorkspacesModal,
+      isCreateWorkspaceOpen,
+      openCreateWorkspaceModal,
+      closeCreateWorkspaceModal,
 
       activeTaskId,
       slideOverTab,
@@ -1434,6 +1844,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       isInviteMemberOpen,
 
       isAuthenticated,
+      isHydrated,
       login,
       register,
       logout,
@@ -1445,10 +1856,15 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       updateTaskField,
       updateTaskDetails,
       createTask,
+      lastCreatedTaskId,
+      clearLastCreatedTaskId,
       deleteTask,
+      moveTaskToGroup,
       voteItem,
 
       addGroup,
+      updateGroup,
+      reorderGroups,
       deleteGroup,
       toggleGroupCollapse,
 
@@ -1502,6 +1918,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       currentUser,
       users,
       workspace,
+      workspaces,
       boards,
       groups,
       tasks,
@@ -1510,6 +1927,17 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       activities,
       notifications,
       unreadNotificationCount,
+      switchWorkspace,
+      createWorkspace,
+      updateWorkspace,
+      deleteWorkspace,
+      togglePinWorkspace,
+      isBrowseWorkspacesOpen,
+      openBrowseWorkspacesModal,
+      closeBrowseWorkspacesModal,
+      isCreateWorkspaceOpen,
+      openCreateWorkspaceModal,
+      closeCreateWorkspaceModal,
       activeTaskId,
       slideOverTab,
       setSlideOverTab,
@@ -1537,6 +1965,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       inviteToBoard,
       acceptBoardInvite,
       isAuthenticated,
+      isHydrated,
       login,
       register,
       logout,
@@ -1548,9 +1977,14 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       updateTaskField,
       updateTaskDetails,
       createTask,
+      lastCreatedTaskId,
+      clearLastCreatedTaskId,
       deleteTask,
+      moveTaskToGroup,
       voteItem,
       addGroup,
+      updateGroup,
+      reorderGroups,
       deleteGroup,
       toggleGroupCollapse,
       toggleSubtask,

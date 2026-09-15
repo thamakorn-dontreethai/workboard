@@ -69,7 +69,11 @@ export const CURRENT_USER = DEFAULT_USER;
 export const MOCK_WORKSPACE: Workspace = {
   id: "ws-1",
   name: "TGAS Workspace",
+  description: "Main workspace for TGAS cross-functional teams and company-wide projects.",
   plan: "Enterprise",
+  privacy: "open",
+  avatarColor: "bg-indigo-600",
+  isPinned: true,
   members: [
     {
       userId: "user-somchai",
@@ -77,9 +81,64 @@ export const MOCK_WORKSPACE: Workspace = {
       role: "owner",
       joinedAt: daysAgo(30),
     },
+    {
+      userId: "user-thamakhorn",
+      workspaceId: "ws-1",
+      role: "member",
+      joinedAt: daysAgo(20),
+    },
+    {
+      userId: "user-1789025805350",
+      workspaceId: "ws-1",
+      role: "member",
+      joinedAt: daysAgo(10),
+    },
   ],
   createdAt: daysAgo(60),
+  lastViewedAt: new Date(),
 };
+
+export const MOCK_WORKSPACES: Workspace[] = [
+  MOCK_WORKSPACE,
+  {
+    id: "ws-2",
+    name: "Growth & Marketing",
+    description: "Brand management, customer acquisition campaigns, and content strategy.",
+    plan: "Pro",
+    privacy: "open",
+    avatarColor: "bg-emerald-600",
+    isPinned: false,
+    members: [
+      {
+        userId: "user-somchai",
+        workspaceId: "ws-2",
+        role: "owner",
+        joinedAt: daysAgo(25),
+      },
+    ],
+    createdAt: daysAgo(45),
+    lastViewedAt: daysAgo(2),
+  },
+  {
+    id: "ws-3",
+    name: "Alex's Personal Space",
+    description: "Private projects, quick notes, and individual task backlog.",
+    plan: "Free",
+    privacy: "closed",
+    avatarColor: "bg-zinc-600",
+    isPinned: false,
+    members: [
+      {
+        userId: "user-somchai",
+        workspaceId: "ws-3",
+        role: "owner",
+        joinedAt: daysAgo(15),
+      },
+    ],
+    createdAt: daysAgo(30),
+    lastViewedAt: daysAgo(5),
+  },
+];
 
 // ─── Boards (Universal Business Terminology) ──────────────────────────────────
 

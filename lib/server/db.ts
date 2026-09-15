@@ -17,6 +17,7 @@ import {
 } from "@/types";
 import {
   MOCK_WORKSPACE,
+  MOCK_WORKSPACES,
   MOCK_USERS,
   MOCK_BOARDS,
   MOCK_GROUPS,
@@ -29,6 +30,7 @@ import {
 
 export interface DatabaseSchema {
   workspace: Workspace;
+  workspaces?: Workspace[];
   users: User[];
   boards: Board[];
   groups: Group[];
@@ -60,6 +62,7 @@ function ensureDirectoryExists() {
 function getInitialData(): DatabaseSchema {
   return {
     workspace: MOCK_WORKSPACE,
+    workspaces: MOCK_WORKSPACES,
     users: MOCK_USERS,
     boards: MOCK_BOARDS,
     groups: MOCK_GROUPS,
@@ -83,8 +86,13 @@ export function readDb(): DatabaseSchema {
   try {
     const raw = fs.readFileSync(DB_FILE, "utf-8");
     const data = JSON.parse(raw);
+    const workspacesList = data.workspaces && data.workspaces.length > 0
+      ? data.workspaces
+      : (data.workspace ? [data.workspace] : MOCK_WORKSPACES);
+
     return {
-      workspace: data.workspace || MOCK_WORKSPACE,
+      workspace: data.workspace || workspacesList[0] || MOCK_WORKSPACE,
+      workspaces: workspacesList,
       users: data.users || MOCK_USERS,
       boards: data.boards || MOCK_BOARDS,
       groups: data.groups || MOCK_GROUPS,
@@ -146,23 +154,101 @@ const isPrismaEnabled = Boolean(process.env.DATABASE_URL && !process.env.VITEST)
 // ─── Workspace Operations ───────────────────────────────────────────────────
 
 export async function getWorkspace(): Promise<Workspace> {
-  if (isPrismaEnabled) {
-    try {
-      const ws = await prisma.workspace.findFirst();
-      if (ws) {
-        return {
-          id: ws.id,
-          name: ws.name,
-          plan: "Enterprise",
-          members: [],
-          createdAt: ws.createdAt,
-        };
-      }
-    } catch (e) {
-      console.warn("Prisma getWorkspace fallback:", e);
-    }
+  const db = readDb();
+  return db.workspace;
+}
+
+export async function getWorkspaces(): Promise<Workspace[]> {
+  const db = readDb();
+  return db.workspaces || [db.workspace];
+}
+
+export async function getWorkspaceById(id: string): Promise<Workspace | undefined> {
+  const db = readDb();
+  const list = db.workspaces || [db.workspace];
+  return list.find((w) => w.id === id);
+}
+
+export async function createWorkspace(data: {
+  name: string;
+  description?: string;
+  privacy?: "open" | "closed";
+  avatarColor?: string;
+  creatorId?: string;
+}): Promise<Workspace> {
+  const db = readDb();
+  const newWorkspace: Workspace = {
+    id: `ws-${Date.now()}`,
+    name: data.name,
+    description: data.description || "",
+    plan: "Pro",
+    privacy: data.privacy || "open",
+    avatarColor: data.avatarColor || "bg-indigo-600",
+    isPinned: false,
+    members: [
+      {
+        userId: data.creatorId || (db.users[0]?.id || "user-somchai"),
+        workspaceId: `ws-${Date.now()}`,
+        role: "owner",
+        joinedAt: new Date(),
+      },
+    ],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    lastViewedAt: new Date(),
+  };
+
+  const updatedWorkspaces = [...(db.workspaces || [db.workspace]), newWorkspace];
+  db.workspaces = updatedWorkspaces;
+  db.workspace = newWorkspace;
+  writeDb(db);
+  return newWorkspace;
+}
+
+export async function updateWorkspace(
+  id: string,
+  updates: Partial<Workspace>
+): Promise<Workspace> {
+  const db = readDb();
+  const list = db.workspaces || [db.workspace];
+  const idx = list.findIndex((w) => w.id === id);
+  if (idx === -1) throw new Error("Workspace not found");
+
+  const updated: Workspace = {
+    ...list[idx],
+    ...updates,
+    updatedAt: new Date(),
+  };
+  list[idx] = updated;
+  db.workspaces = list;
+  if (db.workspace.id === id) {
+    db.workspace = updated;
   }
-  return readDb().workspace;
+  writeDb(db);
+  return updated;
+}
+
+export async function deleteWorkspace(id: string): Promise<boolean> {
+  const db = readDb();
+  const list = db.workspaces || [db.workspace];
+  if (list.length <= 1) {
+    throw new Error("Cannot delete the only workspace");
+  }
+  db.workspaces = list.filter((w) => w.id !== id);
+  if (db.workspace.id === id) {
+    db.workspace = db.workspaces[0];
+  }
+  writeDb(db);
+  return true;
+}
+
+export async function togglePinWorkspace(id: string): Promise<Workspace> {
+  const db = readDb();
+  const list = db.workspaces || [db.workspace];
+  const target = list.find((w) => w.id === id);
+  if (!target) throw new Error("Workspace not found");
+
+  return updateWorkspace(id, { isPinned: !target.isPinned });
 }
 
 // ─── Users Operations ────────────────────────────────────────────────────────

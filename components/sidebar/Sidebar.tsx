@@ -27,7 +27,12 @@ import {
   FilePlus,
   FolderPlus,
   Calendar,
+  LayoutGrid,
+  Pin,
+  Globe,
+  Lock,
 } from "lucide-react";
+import { WorkspaceAvatar } from "@/components/workspace/WorkspaceAvatar";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -45,7 +50,12 @@ export function Sidebar({
   const pathname = usePathname();
   const router = useRouter();
   const {
+    workspaces,
     workspace,
+    switchWorkspace,
+    togglePinWorkspace,
+    openBrowseWorkspacesModal,
+    openCreateWorkspaceModal,
     boards,
     getMyTasks,
     unreadNotificationCount,
@@ -64,6 +74,7 @@ export function Sidebar({
   const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [workspaceSearchQuery, setWorkspaceSearchQuery] = useState("");
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({
     "team-folder": true,
   });
@@ -354,25 +365,6 @@ export function Sidebar({
               </span>
             )}
           </Link>
-
-          {/* 4. Team & Members */}
-          <Link
-            href="/team"
-            onClick={onItemClick}
-            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-              pathname === "/team"
-                ? "bg-[#36384d] text-white font-semibold shadow-xs"
-                : "text-zinc-300 hover:bg-[#232533] hover:text-white"
-            }`}
-          >
-            <div className="flex items-center gap-2 min-w-0">
-              <Users className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-              <span className="truncate">Team & Members</span>
-            </div>
-            <span className="rounded-full bg-emerald-500/20 text-emerald-400 px-1.5 py-0.2 text-[10px] font-bold">
-              {users.length}
-            </span>
-          </Link>
         </div>
       </div>
 
@@ -448,67 +440,189 @@ export function Sidebar({
             </div>
           )}
 
-          {/* 3. Workspace Selector Box: [ [M🏠] My Team  ▾ ]  [ + ] */}
-          <div className="flex items-center gap-1.5">
+          {/* 3. Workspace Selector Box: unified pill [ [Avatar] TESTER ▾ | + ] */}
+          <div className="flex items-center rounded-lg border border-zinc-700/80 bg-[#1f212c]">
             {/* Workspace Button with dropdown */}
             <div className="relative flex-1" ref={workspaceDropdownRef}>
               <button
                 type="button"
                 onClick={() => setIsWorkspaceDropdownOpen(!isWorkspaceDropdownOpen)}
-                className="w-full flex items-center justify-between rounded-lg border border-zinc-700/80 bg-[#1f212c] hover:bg-[#252836] transition-colors px-2.5 py-1.5 text-left shadow-xs"
+                className="w-full flex items-center justify-between hover:bg-[#252836] transition-colors px-2.5 py-1.5 text-left cursor-pointer"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="relative flex h-5 w-5 shrink-0 items-center justify-center rounded bg-indigo-600 text-white font-bold text-[10px]">
-                    <span>{(workspace.name || "M").charAt(0).toUpperCase()}</span>
-                    <span className="absolute -bottom-1 -right-1 text-[7px]">🏠</span>
-                  </div>
+                  <WorkspaceAvatar
+                    name={workspace.name}
+                    avatarColor={workspace.avatarColor || "bg-indigo-600"}
+                    icon={workspace.icon || "initial"}
+                    size="md"
+                  />
                   <span className="truncate text-xs font-semibold text-white">
-                    {workspace.name || "My Team"}
+                    {workspace.name || "My Workspace"}
                   </span>
                 </div>
                 <ChevronDown className="h-3.5 w-3.5 text-zinc-400 shrink-0 ml-1" />
               </button>
 
-              {/* Workspace switch dropdown */}
+              {/* Workspace switch dropdown (Matching User Diagram Stage 1) */}
               {isWorkspaceDropdownOpen && (
-                <div className="absolute left-0 top-full mt-1 z-50 w-56 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1 shadow-2xl text-xs animate-in fade-in zoom-in-95">
-                  <div className="px-2 py-1 text-[10px] font-bold uppercase text-zinc-500">
-                    Switch Workspace
+                <div className="absolute left-0 top-full mt-1 z-50 w-64 rounded-xl border border-zinc-700 bg-[#191a24] p-2 shadow-2xl text-xs animate-in fade-in zoom-in-95">
+                  {/* Search for a workspace */}
+                  <div className="relative mb-2">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+                    <input
+                      type="text"
+                      autoFocus
+                      value={workspaceSearchQuery}
+                      onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
+                      placeholder="Search for a workspace"
+                      className="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-zinc-700/80 bg-zinc-900/90 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+                    />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsWorkspaceDropdownOpen(false)}
-                    className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-indigo-600/20 text-white font-medium mb-0.5"
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-5 w-5 items-center justify-center rounded bg-indigo-600 text-white font-bold text-[10px]">
-                        M
+
+                  <div className="max-h-56 overflow-y-auto space-y-2 scrollbar-thin">
+                    {/* Recent Workspaces */}
+                    <div className="space-y-0.5">
+                      <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                        Recent workspaces
                       </div>
-                      <span>My Team (Main)</span>
+                      {workspaces
+                        .filter((ws) =>
+                          ws.name
+                            .toLowerCase()
+                            .includes(workspaceSearchQuery.toLowerCase())
+                        )
+                        .slice(0, 3)
+                        .map((ws) => {
+                          const isCurrent = ws.id === workspace.id;
+                          return (
+                            <div
+                              key={`recent-${ws.id}`}
+                              className={`group/ws flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                isCurrent
+                                  ? "bg-indigo-600/25 text-white font-medium"
+                                  : "text-zinc-300 hover:bg-zinc-800/80 hover:text-white"
+                              }`}
+                              onClick={() => {
+                                switchWorkspace(ws.id);
+                                setIsWorkspaceDropdownOpen(false);
+                                router.push(`/workspace/${ws.id}`);
+                              }}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <WorkspaceAvatar
+                                  name={ws.name}
+                                  avatarColor={ws.avatarColor || "bg-indigo-600"}
+                                  icon={ws.icon || "initial"}
+                                  size="sm"
+                                />
+                                <span className="truncate text-xs">{ws.name}</span>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  togglePinWorkspace(ws.id);
+                                }}
+                                className={`p-0.5 rounded transition-colors ${
+                                  ws.isPinned
+                                    ? "text-amber-400"
+                                    : "text-zinc-500 opacity-0 group-hover/ws:opacity-100 hover:text-zinc-300"
+                                }`}
+                              >
+                                <Pin className="h-3 w-3" />
+                              </button>
+                            </div>
+                          );
+                        })}
                     </div>
-                    <Check className="h-3.5 w-3.5 text-indigo-400" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsWorkspaceDropdownOpen(false)}
-                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-zinc-300 hover:bg-zinc-800 hover:text-white"
-                  >
-                    <div className="flex h-5 w-5 items-center justify-center rounded bg-emerald-600 text-white font-bold text-[10px]">
-                      G
+
+                    {/* My Workspaces */}
+                    <div className="space-y-0.5 pt-1 border-t border-zinc-800/80">
+                      <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                        My workspaces
+                      </div>
+                      {workspaces
+                        .filter((ws) =>
+                          ws.name
+                            .toLowerCase()
+                            .includes(workspaceSearchQuery.toLowerCase())
+                        )
+                        .map((ws) => {
+                          const isCurrent = ws.id === workspace.id;
+                          return (
+                            <div
+                              key={`my-${ws.id}`}
+                              className={`group/ws flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                isCurrent
+                                  ? "bg-indigo-600/25 text-white font-medium"
+                                  : "text-zinc-300 hover:bg-zinc-800/80 hover:text-white"
+                              }`}
+                              onClick={() => {
+                                switchWorkspace(ws.id);
+                                setIsWorkspaceDropdownOpen(false);
+                                router.push(`/workspace/${ws.id}`);
+                              }}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <WorkspaceAvatar
+                                  name={ws.name}
+                                  avatarColor={ws.avatarColor || "bg-indigo-600"}
+                                  icon={ws.icon || "initial"}
+                                  size="sm"
+                                />
+                                <span className="truncate text-xs">{ws.name}</span>
+                              </div>
+
+                              {isCurrent && (
+                                <Check className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                              )}
+                            </div>
+                          );
+                        })}
                     </div>
-                    <span>Growth & Marketing</span>
-                  </button>
+                  </div>
+
+                  {/* Footer Actions: Browse all + Add workspace */}
+                  <div className="mt-2 pt-1.5 border-t border-zinc-800 space-y-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsWorkspaceDropdownOpen(false);
+                        openBrowseWorkspacesModal();
+                      }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                    >
+                      <LayoutGrid className="h-3.5 w-3.5 text-zinc-400" />
+                      <span>Browse all</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsWorkspaceDropdownOpen(false);
+                        openCreateWorkspaceModal();
+                      }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                    >
+                      <Plus className="h-3.5 w-3.5 text-zinc-400" />
+                      <span>Add workspace</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* [+] Button next to workspace selector */}
+            {/* Divider */}
+            <div className="w-px h-6 bg-zinc-700/80 shrink-0" />
+
+            {/* [+] Button — joined to workspace selector */}
             <div className="relative shrink-0" ref={plusMenuRef}>
               <button
                 type="button"
                 onClick={() => setIsPlusMenuOpen(!isPlusMenuOpen)}
                 title="Add new board or item"
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700/80 bg-[#1f212c] hover:bg-[#252836] text-zinc-300 hover:text-white transition-colors shadow-xs"
+                className="flex h-full px-2.5 py-1.5 items-center justify-center hover:bg-[#252836] text-zinc-300 hover:text-white transition-colors cursor-pointer"
               >
                 <Plus className="h-4 w-4" />
               </button>
@@ -577,89 +691,96 @@ export function Sidebar({
 
         {/* 4. Projects / Boards Section */}
         <div className="space-y-2 pt-1">
-          {boards.length === 0 ? (
-            <div className="p-3 text-center rounded-xl border border-dashed border-zinc-700/60 bg-zinc-900/40 space-y-2">
-              <p className="text-xs text-zinc-300 font-medium">No projects yet</p>
-              <p className="text-[11px] text-zinc-500 leading-relaxed">
-                Create a project to start organizing tasks with your team.
-              </p>
-              <div className="pt-1 flex flex-col gap-1.5">
-                <button
-                  type="button"
-                  onClick={openCreateBoardModal}
-                  className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs transition-colors"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>Create First Project</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={openInviteMemberModal}
-                  className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 hover:text-white text-xs font-medium transition-colors"
-                >
-                  <Users className="h-3.5 w-3.5 text-emerald-400" />
-                  <span>Invite Members</span>
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-0.5">
-              <div className="flex items-center justify-between px-1 py-1 text-[11px] font-semibold text-zinc-400">
-                <span>Projects ({boards.length})</span>
-                <button
-                  type="button"
-                  onClick={openCreateBoardModal}
-                  title="Add new project"
-                  className="text-zinc-400 hover:text-white p-0.5 rounded transition-colors"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              </div>
-
-              {boards.map((b) => {
-                const isActive = pathname === `/board/${b.id}`;
-                const taskCount = tasks.filter((t) => t.boardId === b.id && !t.isArchived).length;
-                return (
-                  <Link
-                    key={b.id}
-                    href={`/board/${b.id}`}
-                    onClick={onItemClick}
-                    className={`group flex items-center justify-between rounded-lg px-2.5 py-2 text-xs transition-all ${
-                      isActive
-                        ? "bg-[#36384d] text-white font-medium shadow-xs"
-                        : "text-zinc-300 hover:bg-[#232533] hover:text-white"
-                    }`}
+          {(() => {
+            const activeWorkspaceBoards = boards.filter(
+              (b) => !b.workspaceId || b.workspaceId === workspace.id
+            );
+            return activeWorkspaceBoards.length === 0 ? (
+              <div className="p-3 text-center rounded-xl border border-dashed border-zinc-700/60 bg-zinc-900/40 space-y-2">
+                <p className="text-xs text-zinc-300 font-medium">No projects yet</p>
+                <p className="text-[11px] text-zinc-500 leading-relaxed">
+                  Create a project in {workspace.name} to get started.
+                </p>
+                <div className="pt-1 flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    onClick={openCreateBoardModal}
+                    className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs transition-colors"
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <Table
-                        className={`h-3.5 w-3.5 shrink-0 transition-colors ${
-                          isActive
-                            ? "text-blue-400"
-                            : "text-zinc-400 group-hover:text-zinc-200"
-                        }`}
-                      />
-                      <span className="truncate">{b.name}</span>
-                    </div>
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Create First Project</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openInviteMemberModal}
+                    className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 hover:text-white text-xs font-medium transition-colors"
+                  >
+                    <Users className="h-3.5 w-3.5 text-emerald-400" />
+                    <span>Invite Members</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                <div className="flex items-center justify-between px-1 py-1 text-[11px] font-semibold text-zinc-400">
+                  <span>Projects ({activeWorkspaceBoards.length})</span>
+                  <button
+                    type="button"
+                    onClick={openCreateBoardModal}
+                    title="Add new project"
+                    className="text-zinc-400 hover:text-white p-0.5 rounded transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </div>
 
-                    {taskCount > 0 && (
-                      <span className="rounded-full bg-zinc-800 text-zinc-400 group-hover:text-zinc-200 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
-                        {taskCount}
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
+                {activeWorkspaceBoards.map((b) => {
+                  const isActive = pathname === `/board/${b.id}`;
+                  const taskCount = tasks.filter(
+                    (t) => t.boardId === b.id && !t.isArchived
+                  ).length;
+                  return (
+                    <Link
+                      key={b.id}
+                      href={`/board/${b.id}`}
+                      onClick={onItemClick}
+                      className={`group flex items-center justify-between rounded-lg px-2.5 py-2 text-xs transition-all ${
+                        isActive
+                          ? "bg-[#36384d] text-white font-medium shadow-xs"
+                          : "text-zinc-300 hover:bg-[#232533] hover:text-white"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Table
+                          className={`h-3.5 w-3.5 shrink-0 transition-colors ${
+                            isActive
+                              ? "text-blue-400"
+                              : "text-zinc-400 group-hover:text-zinc-200"
+                          }`}
+                        />
+                        <span className="truncate">{b.name}</span>
+                      </div>
 
-              <button
-                type="button"
-                onClick={openCreateBoardModal}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 mt-1 rounded-lg text-xs text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800/40 transition-colors"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>+ Add Board / Project</span>
-              </button>
-            </div>
-          )}
+                      {taskCount > 0 && (
+                        <span className="rounded-full bg-zinc-800 text-zinc-400 group-hover:text-zinc-200 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
+                          {taskCount}
+                        </span>
+                      )}
+                    </Link>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  onClick={openCreateBoardModal}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 mt-1 rounded-lg text-xs text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800/40 transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>+ Add Board / Project</span>
+                </button>
+              </div>
+            );
+          })()}
         </div>
       </div>
 

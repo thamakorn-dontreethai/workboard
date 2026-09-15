@@ -21,9 +21,18 @@ export interface User {
 export interface Workspace {
   id: ID;
   name: string;
+  description?: string;
+  logo?: string;
+  icon?: string; // e.g. "initial", "origami", "bolt", "brain", "crown", "diamond", etc.
   plan: "Free" | "Pro" | "Enterprise";
+  privacy: "open" | "closed";
+  avatarColor: string; // e.g. "bg-indigo-600"
+  coverColor?: string; // Gradient / color for workspace cover header
+  isPinned?: boolean;
   members: WorkspaceMember[];
   createdAt: Date;
+  updatedAt?: Date;
+  lastViewedAt?: Date;
 }
 
 export interface WorkspaceMember {
@@ -37,6 +46,8 @@ export interface WorkspaceMember {
 
 export type BoardType = "project" | "roadmap" | "requests" | "marketing" | "operations" | "general";
 
+export type BoardPrivacy = "main" | "private" | "shareable";
+
 export interface Board {
   id: ID;
   workspaceId: ID;
@@ -45,6 +56,7 @@ export interface Board {
   description: string;
   type: BoardType;
   color: string; // Tailwind color class e.g. "bg-blue-500"
+  privacy?: BoardPrivacy;
   ownerId: ID;
   memberIds: ID[];
   groupIds: ID[];
@@ -327,6 +339,21 @@ export const TASK_PRIORITY_CONFIG: Record<
     iconColor: "text-zinc-500",
   },
 };
+
+/** Shared palette used when a new group needs a color — both for picking a
+ *  default that isn't reused within a board and for the group color picker UI. */
+export const GROUP_COLOR_PALETTE: string[] = [
+  "#0073ea", // Blue
+  "#a25ddc", // Purple
+  "#00c875", // Green
+  "#fdab3d", // Orange
+  "#e2445c", // Red
+  "#579bfc", // Sky
+  "#ff642e", // Deep orange
+  "#bb3354", // Maroon
+  "#037f4c", // Dark green
+  "#9d99b9", // Gray purple
+];
 
 /** Safe helper to get status configuration with robust fallback */
 export function getTaskStatusConfig(status: TaskStatus | string | undefined | null) {
