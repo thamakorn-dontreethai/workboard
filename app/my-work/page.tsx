@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 import {
   TASK_STATUS_CONFIG,
@@ -39,6 +40,14 @@ export default function MyWorkPage() {
   const [filter, setFilter] = useState<"all" | "in_progress" | "high" | "done">(
     "all"
   );
+
+  // Deep-link support: /my-work?taskId=... (e.g. from the Calendar page)
+  // opens that task's detail slide-over automatically on arrival.
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const taskId = searchParams.get("taskId");
+    if (taskId) openTaskModal(taskId);
+  }, [searchParams, openTaskModal]);
 
   const myTasks = tasks.filter((t) => t.assigneeId === currentUser.id && !t.isArchived);
 

@@ -28,6 +28,7 @@ import {
   Pencil,
   MoreHorizontal,
   ArrowRightLeft,
+  X,
 } from "lucide-react";
 
 interface MondayTableProps {
@@ -47,7 +48,9 @@ export function MondayTable({ boardId }: MondayTableProps) {
     lastCreatedTaskId,
     clearLastCreatedTaskId,
     deleteTask,
+    deleteTasks,
     moveTaskToGroup,
+    moveTasksToGroup,
     deleteGroup,
     toggleGroupCollapse,
     addGroup,
@@ -82,6 +85,11 @@ export function MondayTable({ boardId }: MondayTableProps) {
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [groupMenuId, setGroupMenuId] = useState<string | null>(null);
   const groupMenuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  // Bulk-selection action bar — appears once one or more checkboxes are
+  // ticked, letting the whole selection be moved or deleted at once.
+  const [isBulkMoveOpen, setIsBulkMoveOpen] = useState(false);
+  const bulkMoveButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // The row "⋯" menu/drag-handle floats outside the table (in the page
   // gutter, level with whichever row is hovered) instead of living inside
@@ -401,6 +409,21 @@ export function MondayTable({ boardId }: MondayTableProps) {
         ? prev.filter((id) => id !== taskId)
         : [...prev, taskId]
     );
+  };
+
+  const handleBulkDelete = () => {
+    const count = selectedTaskIds.length;
+    if (count === 0) return;
+    if (confirm(`Delete ${count} item${count === 1 ? "" : "s"}? This can't be undone.`)) {
+      deleteTasks(selectedTaskIds);
+      setSelectedTaskIds([]);
+    }
+  };
+
+  const handleBulkMove = (targetGroupId: string) => {
+    moveTasksToGroup(selectedTaskIds, targetGroupId);
+    setIsBulkMoveOpen(false);
+    setSelectedTaskIds([]);
   };
 
   const statusList: TaskStatus[] = [
@@ -997,6 +1020,83 @@ export function MondayTable({ boardId }: MondayTableProps) {
           </div>
         );
       })}
+
+      {/* ─── Bulk Selection Action Bar ──────────────────────────────────
+          Floats above everything at the bottom of the viewport once one
+          or more checkboxes are ticked. Portal'd to <body> so it isn't
+          clipped by the table's horizontal-scroll container. */}
+      {selectedTaskIds.length > 0 &&
+        createPortal(
+          <div className="fixed inset-x-0 bottom-5 z-50 flex justify-center px-4 pointer-events-none animate-in slide-in-from-bottom-2 fade-in duration-200">
+            <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-zinc-700 bg-[#1c1e28] pl-4 pr-2 py-2 shadow-2xl shadow-black/40">
+              <span className="flex items-center gap-2 pr-3 mr-1 border-r border-zinc-700 text-xs font-semibold text-white whitespace-nowrap">
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0073ea] px-1.5 text-[11px] font-bold text-white">
+                  {selectedTaskIds.length}
+                </span>
+                <span>selected</span>
+              </span>
+
+              <button
+                type="button"
+                ref={bulkMoveButtonRef}
+                onClick={() => setIsBulkMoveOpen((v) => !v)}
+                disabled={boardGroups.length < 2}
+                title={boardGroups.length < 2 ? "No other group to move to" : "Move to another group"}
+                className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+              >
+                <ArrowRightLeft className="h-3.5 w-3.5" />
+                <span>Move to</span>
+              </button>
+
+              <FloatingPanel
+                isOpen={isBulkMoveOpen}
+                onClose={() => setIsBulkMoveOpen(false)}
+                anchorRef={bulkMoveButtonRef}
+                align="left"
+                className="w-52 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-left"
+              >
+                <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                  Move {selectedTaskIds.length} item{selectedTaskIds.length === 1 ? "" : "s"} to
+                </div>
+                {boardGroups.map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => handleBulkMove(g.id)}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                  >
+                    <span
+                      className="h-2.5 w-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: g.color || "#0073ea" }}
+                    />
+                    <span className="truncate">{g.name}</span>
+                  </button>
+                ))}
+              </FloatingPanel>
+
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Delete</span>
+              </button>
+
+              <div className="mx-1 h-5 w-px bg-zinc-700" />
+
+              <button
+                type="button"
+                onClick={() => setSelectedTaskIds([])}
+                title="Clear selection"
+                className="flex items-center justify-center h-7 w-7 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* "+ add new group" Button at bottom */}
       <div className="pt-2">

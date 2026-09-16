@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 import {
   TASK_STATUS_CONFIG,
@@ -9,6 +10,7 @@ import {
   Task,
   TaskStatus,
   TaskPriority,
+  PersonalTodo,
 } from "@/types";
 import { formatDate, isOverdue } from "@/lib/utils/date";
 import { getThaiHolidayForDate, ThaiHoliday } from "@/lib/utils/thaiHolidays";
@@ -24,19 +26,18 @@ import {
   AlertTriangle,
   Filter,
   Search,
-  Users,
   Briefcase,
   LayoutGrid,
   List,
   CalendarDays,
-  Sparkles,
   ChevronDown,
   X,
   Flame,
   CalendarCheck2,
-  Compass,
-  Megaphone,
-  Inbox,
+  Building2,
+  StickyNote,
+  Bell,
+  Trash2,
 } from "lucide-react";
 
 type ViewMode = "month" | "agenda";
@@ -86,11 +87,16 @@ function getPriorityCfg(priority: TaskPriority | string) {
 }
 
 export default function CalendarPage() {
+  const router = useRouter();
   const {
-    currentUser,
     tasks,
     boards,
     users,
+    workspaces,
+    personalTodos,
+    createPersonalTodo,
+    toggleTodoComplete,
+    deletePersonalTodo,
     updateTaskStatus,
     updateTaskDueDate,
     openTaskModal,
@@ -102,8 +108,14 @@ export default function CalendarPage() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>("month");
 
+  // Quick "Add personal to-do" inline form (side panel)
+  const [isAddingTodo, setIsAddingTodo] = useState<boolean>(false);
+  const [newTodoTitle, setNewTodoTitle] = useState<string>("");
+  const [newTodoTime, setNewTodoTime] = useState<string>("09:00");
+  const [newTodoReminderMinutes, setNewTodoReminderMinutes] = useState<number>(10);
+
   // Filters (Defaults to "all" so all tasks in the workspace are visible by default)
-  const [assigneeFilter, setAssigneeFilter] = useState<string>("all"); // "all" | "me" | userId
+  const [workspaceFilter, setWorkspaceFilter] = useState<string>("all"); // "all" | workspaceId
   const [boardFilter, setBoardFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
@@ -131,29 +143,6 @@ export default function CalendarPage() {
     setSelectedDate(today);
   };
 
-  // Quick Preset Filters
-  const setQuickFilter = (type: "all" | "me" | "roadmap" | "projects" | "marketing" | "requests") => {
-    if (type === "all") {
-      setAssigneeFilter("all");
-      setBoardFilter("all");
-    } else if (type === "me") {
-      setAssigneeFilter("me");
-      setBoardFilter("all");
-    } else if (type === "roadmap") {
-      setAssigneeFilter("all");
-      setBoardFilter("board-roadmap");
-    } else if (type === "projects") {
-      setAssigneeFilter("all");
-      setBoardFilter("board-1");
-    } else if (type === "marketing") {
-      setAssigneeFilter("all");
-      setBoardFilter("board-marketing");
-    } else if (type === "requests") {
-      setAssigneeFilter("all");
-      setBoardFilter("board-requests");
-    }
-  };
-
   // Active unarchived tasks
   const activeTasks = useMemo(() => {
     return tasks.filter((t) => !t.isArchived);
@@ -162,11 +151,10 @@ export default function CalendarPage() {
   // Filter tasks based on selected settings
   const filteredTasks = useMemo(() => {
     return activeTasks.filter((task) => {
-      // Assignee filter
-      if (assigneeFilter === "me") {
-        if (task.assigneeId !== currentUser.id) return false;
-      } else if (assigneeFilter !== "all") {
-        if (task.assigneeId !== assigneeFilter) return false;
+      // Workspace filter
+      if (workspaceFilter !== "all") {
+        const taskBoard = boards.find((b) => b.id === task.boardId);
+        if (!taskBoard || taskBoard.workspaceId !== workspaceFilter) return false;
       }
 
       // Board filter
@@ -192,8 +180,8 @@ export default function CalendarPage() {
     });
   }, [
     activeTasks,
-    assigneeFilter,
-    currentUser.id,
+    workspaceFilter,
+    boards,
     boardFilter,
     statusFilter,
     priorityFilter,
@@ -226,6 +214,23 @@ export default function CalendarPage() {
 
     return map;
   }, [filteredTasks]);
+
+  // Map personal to-dos to dates (YYYY-MM-DD) — independent of workspace/
+  // board filters since they are private and never belong to either.
+  const todosByDate = useMemo(() => {
+    const map = new Map<string, PersonalTodo[]>();
+
+    personalTodos.forEach((todo) => {
+      const due = parseSafeDate(todo.dueAt);
+      if (!due) return;
+
+      const dueKey = toDateKey(due);
+      const existing = map.get(dueKey) || [];
+      map.set(dueKey, [...existing, todo]);
+    });
+
+    return map;
+  }, [personalTodos]);
 
   // Monthly stats
   const monthlyStats = useMemo(() => {
@@ -286,6 +291,7 @@ export default function CalendarPage() {
   // Selected date key & items
   const selectedDateKey = toDateKey(selectedDate);
   const selectedDateTasks = tasksByDate.get(selectedDateKey) || [];
+  const selectedDateTodos = todosByDate.get(selectedDateKey) || [];
   const selectedDayHoliday = showThaiHolidays ? getThaiHolidayForDate(selectedDate) : null;
 
   // Today key
@@ -307,6 +313,34 @@ export default function CalendarPage() {
   // Helper to schedule an unscheduled task to the selected date
   const handleScheduleTask = (taskId: string, targetDate: Date) => {
     updateTaskDueDate(taskId, targetDate);
+  };
+
+  // Personal to-do quick-add (side panel) — private per-user reminder,
+  // never tied to any board/workspace.
+  const handleOpenAddTodo = () => {
+    setNewTodoTitle("");
+    setNewTodoTime("09:00");
+    setNewTodoReminderMinutes(10);
+    setIsAddingTodo(true);
+  };
+
+  const handleSubmitNewTodo = async () => {
+    if (!newTodoTitle.trim()) return;
+    const [hh, mm] = newTodoTime.split(":").map((v) => parseInt(v, 10) || 0);
+    const dueAt = new Date(selectedDate);
+    dueAt.setHours(hh, mm, 0, 0);
+
+    try {
+      await createPersonalTodo({
+        title: newTodoTitle.trim(),
+        dueAt,
+        reminderMinutesBefore: newTodoReminderMinutes,
+      });
+      setIsAddingTodo(false);
+      setNewTodoTitle("");
+    } catch (err) {
+      console.error("Failed to create personal to-do:", err);
+    }
   };
 
   // Get Board Theme / Color
@@ -345,13 +379,13 @@ export default function CalendarPage() {
                   {monthlyStats.total} scheduled this month
                 </span>
               </div>
-              <p className="text-xs text-zinc-400 truncate mt-0.5">
-                {assigneeFilter === "me"
-                  ? `Showing tasks assigned to ${currentUser.name} (${currentUser.role})`
-                  : boardFilter !== "all"
-                  ? `Showing tasks from ${boards.find((b) => b.id === boardFilter)?.name || "selected board"}`
-                  : "Task calendar synchronized with Thai official holidays and all workspace deliverables"}
-              </p>
+              {(workspaceFilter !== "all" || boardFilter !== "all") && (
+                <p className="text-xs text-zinc-400 truncate mt-0.5">
+                  {workspaceFilter !== "all"
+                    ? `Showing tasks from ${workspaces.find((w) => w.id === workspaceFilter)?.name || "selected workspace"}`
+                    : `Showing tasks from ${boards.find((b) => b.id === boardFilter)?.name || "selected board"}`}
+                </p>
+              )}
             </div>
           </div>
 
@@ -384,97 +418,7 @@ export default function CalendarPage() {
               <List className="h-3.5 w-3.5" />
               <span>{showSidePanel ? "Hide Details" : "Show Details"}</span>
             </button>
-
-            <button
-              type="button"
-              onClick={() => handleAddNewForDate(selectedDate)}
-              className="flex items-center gap-1.5 rounded-lg bg-[#0073ea] hover:bg-[#0060c0] px-3.5 py-1.5 text-xs font-semibold text-white transition-colors shadow-sm"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>New Task</span>
-            </button>
           </div>
-        </div>
-
-        {/* ─── Quick Board / Workflow Preset Tabs ────────────────────────── */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs scrollbar-none">
-          <button
-            type="button"
-            onClick={() => setQuickFilter("all")}
-            className={`px-3 py-1 rounded-lg font-medium transition-colors shrink-0 flex items-center gap-1.5 ${
-              assigneeFilter === "all" && boardFilter === "all"
-                ? "bg-indigo-600 text-white font-semibold shadow-xs"
-                : "bg-[#1f212c] text-zinc-300 hover:bg-zinc-800 hover:text-white border border-[#2e3144]"
-            }`}
-          >
-            <Sparkles className="h-3 w-3 text-indigo-400" />
-            <span>All Tasks (ทั้งหมด)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setQuickFilter("me")}
-            className={`px-3 py-1 rounded-lg font-medium transition-colors shrink-0 flex items-center gap-1.5 ${
-              assigneeFilter === "me"
-                ? "bg-indigo-600 text-white font-semibold shadow-xs"
-                : "bg-[#1f212c] text-zinc-300 hover:bg-zinc-800 hover:text-white border border-[#2e3144]"
-            }`}
-          >
-            <Users className="h-3 w-3 text-sky-400" />
-            <span>My Work (งานของฉัน)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setQuickFilter("roadmap")}
-            className={`px-3 py-1 rounded-lg font-medium transition-colors shrink-0 flex items-center gap-1.5 ${
-              boardFilter === "board-roadmap"
-                ? "bg-emerald-600 text-white font-semibold shadow-xs"
-                : "bg-[#1f212c] text-zinc-300 hover:bg-zinc-800 hover:text-white border border-[#2e3144]"
-            }`}
-          >
-            <Compass className="h-3 w-3 text-emerald-400" />
-            <span>Company Goals & OKRs</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setQuickFilter("projects")}
-            className={`px-3 py-1 rounded-lg font-medium transition-colors shrink-0 flex items-center gap-1.5 ${
-              boardFilter === "board-1"
-                ? "bg-blue-600 text-white font-semibold shadow-xs"
-                : "bg-[#1f212c] text-zinc-300 hover:bg-zinc-800 hover:text-white border border-[#2e3144]"
-            }`}
-          >
-            <Briefcase className="h-3 w-3 text-blue-400" />
-            <span>Projects & Deliverables</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setQuickFilter("marketing")}
-            className={`px-3 py-1 rounded-lg font-medium transition-colors shrink-0 flex items-center gap-1.5 ${
-              boardFilter === "board-marketing"
-                ? "bg-purple-600 text-white font-semibold shadow-xs"
-                : "bg-[#1f212c] text-zinc-300 hover:bg-zinc-800 hover:text-white border border-[#2e3144]"
-            }`}
-          >
-            <Megaphone className="h-3 w-3 text-purple-400" />
-            <span>Marketing & Launch</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setQuickFilter("requests")}
-            className={`px-3 py-1 rounded-lg font-medium transition-colors shrink-0 flex items-center gap-1.5 ${
-              boardFilter === "board-requests"
-                ? "bg-amber-600 text-white font-semibold shadow-xs"
-                : "bg-[#1f212c] text-zinc-300 hover:bg-zinc-800 hover:text-white border border-[#2e3144]"
-            }`}
-          >
-            <Inbox className="h-3 w-3 text-amber-400" />
-            <span>Client Requests</span>
-          </button>
         </div>
       </div>
 
@@ -531,24 +475,21 @@ export default function CalendarPage() {
             <span>วันหยุดไทย</span>
           </button>
 
-          {/* Assignee Filter */}
+          {/* Workspace Filter */}
           <div className="flex items-center gap-1 bg-[#1f212c] border border-[#2e3144] rounded-lg px-2 py-0.5">
-            <Users className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+            <Building2 className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
             <select
-              value={assigneeFilter}
-              onChange={(e) => setAssigneeFilter(e.target.value)}
-              aria-label="Filter tasks by assignee"
+              value={workspaceFilter}
+              onChange={(e) => setWorkspaceFilter(e.target.value)}
+              aria-label="Filter tasks by workspace"
               className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer py-1 pr-1 font-medium"
             >
               <option value="all" className="bg-[#1c1e28] text-white">
-                👥 All Assignees (ทั้งหมด)
+                🏢 All Workspace (ทั้งหมด)
               </option>
-              <option value="me" className="bg-[#1c1e28] text-white">
-                👤 My Tasks ({currentUser.name})
-              </option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id} className="bg-[#1c1e28] text-white">
-                  {u.name} ({u.role})
+              {workspaces.map((w) => (
+                <option key={w.id} value={w.id} className="bg-[#1c1e28] text-white">
+                  {w.name}
                 </option>
               ))}
             </select>
@@ -736,6 +677,7 @@ export default function CalendarPage() {
                 {calendarDays.map(({ date, isCurrentMonth }) => {
                   const cellKey = toDateKey(date);
                   const dayTasks = tasksByDate.get(cellKey) || [];
+                  const dayTodos = todosByDate.get(cellKey) || [];
                   const isToday = cellKey === todayKey;
                   const isSelected = cellKey === selectedDateKey;
                   const holiday = showThaiHolidays ? getThaiHolidayForDate(date) : null;
@@ -775,9 +717,9 @@ export default function CalendarPage() {
                             {date.getDate()}
                           </span>
 
-                          {dayTasks.length > 0 && (
+                          {dayTasks.length + dayTodos.length > 0 && (
                             <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800/80 rounded-full px-1.5 py-0.2">
-                              {dayTasks.length}
+                              {dayTasks.length + dayTodos.length}
                             </span>
                           )}
                         </div>
@@ -807,7 +749,7 @@ export default function CalendarPage() {
                         </div>
                       )}
 
-                      {/* Task Chips Container */}
+                      {/* Task & To-Do Chips Container */}
                       <div className="flex-1 space-y-1 overflow-y-hidden">
                         {dayTasks.slice(0, holiday ? 2 : 3).map((task) => {
                           const statusCfg = getStatusCfg(task.status);
@@ -856,10 +798,34 @@ export default function CalendarPage() {
                           );
                         })}
 
+                        {/* Personal to-do chips (fill remaining slots after tasks) */}
+                        {dayTodos
+                          .slice(0, Math.max(0, (holiday ? 2 : 3) - dayTasks.length))
+                          .map((todo) => (
+                            <div
+                              key={`${todo.id}-${cellKey}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleTodoComplete(todo.id);
+                              }}
+                              title={`${todo.title} (Personal To-Do)`}
+                              className={`group/chip flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] truncate border border-dashed transition-all ${
+                                todo.isCompleted
+                                  ? "bg-violet-950/10 border-violet-800/30 text-zinc-500 line-through"
+                                  : "bg-violet-950/20 border-violet-700/40 text-violet-200 hover:border-violet-500"
+                              }`}
+                            >
+                              <StickyNote className="h-3 w-3 shrink-0" />
+                              <span className="truncate font-medium flex-1">
+                                {todo.title}
+                              </span>
+                            </div>
+                          ))}
+
                         {/* "+N more" badge */}
-                        {dayTasks.length > (holiday ? 2 : 3) && (
+                        {dayTasks.length + dayTodos.length > (holiday ? 2 : 3) && (
                           <div className="text-[10px] font-bold text-indigo-400 pl-1 hover:underline">
-                            +{dayTasks.length - (holiday ? 2 : 3)} more
+                            +{dayTasks.length + dayTodos.length - (holiday ? 2 : 3)} more
                           </div>
                         )}
                       </div>
@@ -1023,7 +989,7 @@ export default function CalendarPage() {
                   })}
                 </h3>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  {selectedDateTasks.length} {selectedDateTasks.length === 1 ? "task" : "tasks"} scheduled on this date
+                  {selectedDateTasks.length} {selectedDateTasks.length === 1 ? "task" : "tasks"} · {selectedDateTodos.length} personal {selectedDateTodos.length === 1 ? "to-do" : "to-dos"}
                 </p>
               </div>
 
@@ -1045,26 +1011,26 @@ export default function CalendarPage() {
 
             {/* Tasks list on selected day */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {selectedDateTasks.length === 0 ? (
+              {selectedDateTasks.length === 0 && selectedDateTodos.length === 0 && !isAddingTodo ? (
                 <div className="py-12 text-center rounded-xl border border-dashed border-[#2e3144] bg-[#14151c]/60 p-4 space-y-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800/80 text-zinc-500 mx-auto">
-                    <CheckCircle2 className="h-5 w-5" />
+                    <StickyNote className="h-5 w-5" />
                   </div>
                   <div>
                     <p className="text-xs font-semibold text-zinc-300">
-                      No tasks scheduled for this day
+                      Nothing scheduled for this day
                     </p>
                     <p className="text-[11px] text-zinc-500 mt-0.5">
-                      You can add a new task or reschedule existing tasks here.
+                      Add a personal to-do — private to you, with an optional reminder.
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleAddNewForDate(selectedDate)}
+                    onClick={handleOpenAddTodo}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors shadow-xs"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    <span>Add Task for this Day</span>
+                    <span>Add To-Do for this Day</span>
                   </button>
                 </div>
               ) : (
@@ -1082,32 +1048,22 @@ export default function CalendarPage() {
                     return (
                       <div
                         key={task.id}
-                        className="p-3 rounded-xl border border-[#292c3d] bg-[#1c1e2a] hover:border-indigo-500/50 hover:bg-[#212433] transition-all space-y-2 group"
+                        onClick={() => router.push(`/my-work?taskId=${task.id}`)}
+                        title="Open in My Work"
+                        className="p-3 rounded-xl border border-[#292c3d] bg-[#1c1e2a] hover:border-indigo-500/50 hover:bg-[#212433] transition-all space-y-2 group cursor-pointer"
                       >
                         <div className="flex items-start gap-2.5">
-                          {/* Done Checkbox */}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              updateTaskStatus(
-                                task.id,
-                                isTaskDone ? "todo" : "done"
-                              )
-                            }
-                            className="mt-0.5 text-zinc-500 hover:text-emerald-400 transition-colors shrink-0"
-                          >
+                          {/* Status indicator (read-only — edit from My Work) */}
+                          <span className="mt-0.5 text-zinc-500 shrink-0">
                             {isTaskDone ? (
                               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
                             ) : (
                               <Circle className="h-4 w-4" />
                             )}
-                          </button>
+                          </span>
 
                           {/* Task title */}
-                          <div
-                            onClick={() => openTaskModal(task.id)}
-                            className="min-w-0 flex-1 cursor-pointer"
-                          >
+                          <div className="min-w-0 flex-1">
                             <h4
                               className={`text-xs font-semibold leading-snug ${
                                 isTaskDone
@@ -1125,7 +1081,7 @@ export default function CalendarPage() {
                           </div>
                         </div>
 
-                        {/* Assignee & Due Date Quick Editor */}
+                        {/* Assignee & Due Date (read-only) */}
                         <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-1 border-t border-[#292c3d]/40">
                           <div className="flex items-center gap-1.5 truncate">
                             {assignee ? (
@@ -1140,20 +1096,16 @@ export default function CalendarPage() {
                             )}
                           </div>
 
-                          {/* Reschedule Date input */}
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="date"
-                              value={parsedDue ? toDateKey(parsedDue) : ""}
-                              onChange={(e) => {
-                                if (e.target.value) {
-                                  updateTaskDueDate(task.id, new Date(e.target.value));
-                                }
-                              }}
-                              className="bg-[#14151e] border border-[#2e3144] rounded px-1.5 py-0.5 text-[10px] text-zinc-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
-                              title="Reschedule task due date"
-                            />
-                          </div>
+                          {parsedDue && (
+                            <span
+                              className={`text-[10px] font-medium tabular-nums ${
+                                overdue ? "text-red-400 font-bold" : "text-zinc-400"
+                              }`}
+                            >
+                              {overdue ? "⚠ " : ""}
+                              {formatDate(parsedDue)}
+                            </span>
+                          )}
                         </div>
 
                         {/* Metadata Footer */}
@@ -1182,14 +1134,124 @@ export default function CalendarPage() {
                     );
                   })}
 
-                  <button
-                    type="button"
-                    onClick={() => handleAddNewForDate(selectedDate)}
-                    className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#2e3144] py-2 text-xs font-semibold text-zinc-400 hover:text-white hover:border-indigo-500 hover:bg-[#1f212c] transition-colors mt-2"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    <span>Add Another Task for this Day</span>
-                  </button>
+                  {/* ─── Personal To-Do Section ───────────────────────────── */}
+                  <div className="pt-3 mt-1 border-t border-[#262836] space-y-2">
+                    <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-violet-400">
+                      <StickyNote className="h-3.5 w-3.5" />
+                      <span>Personal To-Do</span>
+                    </span>
+
+                    {selectedDateTodos.map((todo) => (
+                      <div
+                        key={todo.id}
+                        className="flex items-start gap-2.5 p-2.5 rounded-xl border border-dashed border-violet-800/40 bg-violet-950/10 hover:border-violet-500/60 transition-all group"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleTodoComplete(todo.id)}
+                          className="mt-0.5 text-zinc-500 hover:text-violet-400 transition-colors shrink-0"
+                        >
+                          {todo.isCompleted ? (
+                            <CheckCircle2 className="h-4 w-4 text-violet-400" />
+                          ) : (
+                            <Circle className="h-4 w-4" />
+                          )}
+                        </button>
+
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className={`text-xs font-semibold leading-snug ${
+                              todo.isCompleted
+                                ? "line-through text-zinc-500"
+                                : "text-zinc-100"
+                            }`}
+                          >
+                            {todo.title}
+                          </p>
+                          {todo.dueAt && (
+                            <span className="flex items-center gap-1 text-[10px] text-zinc-400 mt-0.5">
+                              <Bell className="h-3 w-3" />
+                              {new Date(todo.dueAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              {" · reminds "}
+                              {todo.reminderMinutesBefore}
+                              {" min before"}
+                            </span>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => deletePersonalTodo(todo.id)}
+                          title="Delete to-do"
+                          className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 transition-all shrink-0"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+
+                    {isAddingTodo ? (
+                      <div className="p-2.5 rounded-xl border border-violet-700/40 bg-[#14151e] space-y-2">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={newTodoTitle}
+                          onChange={(e) => setNewTodoTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSubmitNewTodo();
+                            if (e.key === "Escape") setIsAddingTodo(false);
+                          }}
+                          placeholder="What do you need to do?"
+                          className="w-full rounded-lg border border-[#2e3144] bg-[#1c1e28] px-2.5 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-violet-500"
+                        />
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="time"
+                            value={newTodoTime}
+                            onChange={(e) => setNewTodoTime(e.target.value)}
+                            className="rounded-lg border border-[#2e3144] bg-[#1c1e28] px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-violet-500"
+                          />
+                          <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+                            <Bell className="h-3 w-3" />
+                            <input
+                              type="number"
+                              min={0}
+                              value={newTodoReminderMinutes}
+                              onChange={(e) => setNewTodoReminderMinutes(parseInt(e.target.value, 10) || 0)}
+                              className="w-12 rounded-lg border border-[#2e3144] bg-[#1c1e28] px-1.5 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-violet-500"
+                            />
+                            <span>min before</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setIsAddingTodo(false)}
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-medium text-zinc-400 hover:text-white transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSubmitNewTodo}
+                            disabled={!newTodoTitle.trim()}
+                            className="px-3 py-1 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:hover:bg-violet-600 text-[11px] font-semibold text-white transition-colors"
+                          >
+                            Add To-Do
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleOpenAddTodo}
+                        className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#2e3144] py-2 text-xs font-semibold text-zinc-400 hover:text-white hover:border-violet-500 hover:bg-[#1f212c] transition-colors"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Add To-Do for this Day</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

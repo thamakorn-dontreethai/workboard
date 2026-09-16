@@ -1,13 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getWorkspaces, getWorkspace, createWorkspace } from "@/lib/server/db";
+import { NextResponse } from "next/server";
+import { getWorkspaces, createWorkspace } from "@/lib/server/db";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const workspaces = await getWorkspaces();
-    const activeWorkspace = await getWorkspace();
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get("userId") || undefined;
+    const workspaces = await getWorkspaces(userId);
     return NextResponse.json({
       success: true,
-      data: activeWorkspace,
+      data: workspaces[0],
       workspaces: workspaces,
     });
   } catch (error: any) {
@@ -18,7 +19,7 @@ export async function GET() {
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
     const body = await req.json();
     if (!body.name || !body.name.trim()) {

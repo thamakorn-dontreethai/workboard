@@ -11,6 +11,8 @@ import {
   Comment,
   Activity,
   Notification,
+  PersonalTodo,
+  Post,
   TaskStatus,
   TaskPriority,
   BoardInvitation,
@@ -26,6 +28,7 @@ import {
   MOCK_COMMENTS,
   MOCK_ACTIVITIES,
   MOCK_NOTIFICATIONS,
+  MOCK_PERSONAL_TODOS,
 } from "@/lib/mock/data";
 
 export interface DatabaseSchema {
@@ -39,6 +42,7 @@ export interface DatabaseSchema {
   comments: Comment[];
   activities: Activity[];
   notifications: Notification[];
+  personalTodos?: PersonalTodo[];
   invitations?: BoardInvitation[];
 }
 
@@ -71,6 +75,7 @@ function getInitialData(): DatabaseSchema {
     comments: MOCK_COMMENTS,
     activities: MOCK_ACTIVITIES,
     notifications: MOCK_NOTIFICATIONS,
+    personalTodos: MOCK_PERSONAL_TODOS,
     invitations: [],
   };
 }
@@ -119,6 +124,13 @@ export function readDb(): DatabaseSchema {
       notifications: (data.notifications || []).map((n: any) => ({
         ...n,
         createdAt: new Date(n.createdAt),
+      })),
+      personalTodos: (data.personalTodos || []).map((t: any) => ({
+        ...t,
+        dueAt: t.dueAt ? new Date(t.dueAt) : null,
+        reminderSentAt: t.reminderSentAt ? new Date(t.reminderSentAt) : null,
+        createdAt: new Date(t.createdAt),
+        updatedAt: new Date(t.updatedAt),
       })),
       invitations: (data.invitations || []).map((i: any) => ({
         ...i,
@@ -191,24 +203,36 @@ function mapWorkspaceRow(row: {
   };
 }
 
-export async function getWorkspaces(): Promise<Workspace[]> {
+// `userId`, when given, restricts the result to workspaces that user is
+// actually a member of — omitting it returns every workspace, which is
+// only appropriate for admin/internal use, never for populating a signed-in
+// user's own workspace switcher (that was the bug: a brand-new user could
+// see and act inside every pre-existing workspace in the database).
+export async function getWorkspaces(userId?: string): Promise<Workspace[]> {
+  let list: Workspace[];
   if (isPrismaEnabled) {
     try {
       const rows = await prisma.workspace.findMany({ orderBy: { createdAt: "asc" } });
       // Return here unconditionally — an empty array is a legitimate,
       // correct answer (no workspaces exist yet), not a signal to fall
       // back to the stale local JSON file. Only a thrown error should.
-      return rows.map(mapWorkspaceRow);
+      list = rows.map(mapWorkspaceRow);
     } catch (e) {
       console.warn("Prisma getWorkspaces fallback:", e);
+      const db = readDb();
+      list = db.workspaces || [db.workspace];
     }
+  } else {
+    const db = readDb();
+    list = db.workspaces || [db.workspace];
   }
-  const db = readDb();
-  return db.workspaces || [db.workspace];
+
+  if (!userId) return list;
+  return list.filter((w) => w.members.some((m) => m.userId === userId));
 }
 
-export async function getWorkspace(): Promise<Workspace> {
-  const list = await getWorkspaces();
+export async function getWorkspace(userId?: string): Promise<Workspace | undefined> {
+  const list = await getWorkspaces(userId);
   return list[0];
 }
 
@@ -1180,6 +1204,74 @@ export async function assignTask(
   newAssigneeId: string | null,
   actorId?: string
 ): Promise<Task | null> {
+  if (isPrismaEnabled) {
+    try {
+      const updated = await prisma.task.update({
+        where: { id: taskId },
+        data: { assigneeId: newAssigneeId },
+        include: { subtasks: true, comments: true, activities: true },
+      });
+
+      const effectiveActorId = actorId || updated.reporterId;
+      const newAssignee = newAssigneeId
+        ? await prisma.user.findUnique({ where: { id: newAssigneeId } })
+        : null;
+
+      await prisma.activity.create({
+        data: {
+          id: `act-${Date.now()}`,
+          taskId,
+          boardId: updated.boardId,
+          actorId: effectiveActorId,
+          type: "assignee_changed",
+          description: newAssignee
+            ? `assigned item to ${newAssignee.name}`
+            : "unassigned item",
+        },
+      }).catch(() => {});
+
+      if (newAssigneeId && newAssigneeId !== effectiveActorId) {
+        await prisma.notification.create({
+          data: {
+            id: `notif-${Date.now()}`,
+            userId: newAssigneeId,
+            type: "assignment",
+            title: "New Task Assigned",
+            body: `You were assigned to "${updated.title}"`,
+            taskId: updated.id,
+            boardId: updated.boardId,
+          },
+        }).catch(() => {});
+      }
+
+      return {
+        id: updated.id,
+        itemCode: updated.itemCode,
+        boardId: updated.boardId,
+        groupId: updated.groupId,
+        title: updated.title,
+        description: updated.description || "",
+        status: (updated.status as any) || "todo",
+        priority: (updated.priority as any) || "medium",
+        assigneeId: updated.assigneeId,
+        reporterId: updated.reporterId,
+        dueDate: updated.dueDate,
+        category: updated.category,
+        tags: [],
+        subtaskIds: updated.subtasks.map((s) => s.id),
+        commentIds: updated.comments.map((c) => c.id),
+        attachmentIds: [],
+        activityIds: updated.activities.map((a) => a.id),
+        order: updated.order,
+        isArchived: updated.isArchived,
+        createdAt: updated.createdAt,
+        updatedAt: updated.updatedAt,
+      };
+    } catch (e) {
+      console.warn("Prisma assignTask fallback:", e);
+    }
+  }
+
   const db = readDb();
   const task = db.tasks.find((t) => t.id === taskId);
   if (!task) return null;
@@ -1191,17 +1283,6 @@ export async function assignTask(
 
   task.assigneeId = newAssigneeId;
   task.updatedAt = new Date();
-
-  if (isPrismaEnabled) {
-    try {
-      await prisma.task.update({
-        where: { id: taskId },
-        data: { assigneeId: newAssigneeId },
-      });
-    } catch (e) {
-      console.warn("Prisma assignTask fallback:", e);
-    }
-  }
 
   // Log activity
   const act: Activity = {
@@ -1551,6 +1632,303 @@ export async function markAllNotificationsRead(
   return true;
 }
 
+// ─── Personal To-Do Operations (private, per-user, not board/workspace-scoped) ─
+
+function mapPersonalTodoRow(row: {
+  id: string;
+  userId: string;
+  title: string;
+  notes: string | null;
+  dueAt: Date | null;
+  reminderMinutesBefore: number;
+  isCompleted: boolean;
+  reminderSentAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): PersonalTodo {
+  return {
+    id: row.id,
+    userId: row.userId,
+    title: row.title,
+    notes: row.notes || "",
+    dueAt: row.dueAt,
+    reminderMinutesBefore: row.reminderMinutesBefore,
+    isCompleted: row.isCompleted,
+    reminderSentAt: row.reminderSentAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export async function getPersonalTodos(userId: string): Promise<PersonalTodo[]> {
+  if (isPrismaEnabled) {
+    try {
+      const rows = await prisma.personalTodo.findMany({
+        where: { userId },
+        orderBy: { createdAt: "asc" },
+      });
+      return rows.map(mapPersonalTodoRow);
+    } catch (e) {
+      console.warn("Prisma getPersonalTodos fallback:", e);
+    }
+  }
+  const db = readDb();
+  return (db.personalTodos || []).filter((t) => t.userId === userId);
+}
+
+export async function createPersonalTodo(data: {
+  userId: string;
+  title: string;
+  notes?: string;
+  dueAt?: Date | null;
+  reminderMinutesBefore?: number;
+}): Promise<PersonalTodo> {
+  const id = `todo-${Date.now()}`;
+  const now = new Date();
+  const newTodo: PersonalTodo = {
+    id,
+    userId: data.userId,
+    title: data.title,
+    notes: data.notes || "",
+    dueAt: data.dueAt || null,
+    reminderMinutesBefore: data.reminderMinutesBefore ?? 10,
+    isCompleted: false,
+    reminderSentAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  if (isPrismaEnabled) {
+    try {
+      const row = await prisma.personalTodo.create({
+        data: {
+          id,
+          userId: newTodo.userId,
+          title: newTodo.title,
+          notes: newTodo.notes,
+          dueAt: newTodo.dueAt,
+          reminderMinutesBefore: newTodo.reminderMinutesBefore,
+        },
+      });
+      return mapPersonalTodoRow(row);
+    } catch (e) {
+      console.warn("Prisma createPersonalTodo fallback:", e);
+    }
+  }
+
+  const db = readDb();
+  db.personalTodos = [...(db.personalTodos || []), newTodo];
+  writeDb(db);
+  return newTodo;
+}
+
+export async function updatePersonalTodo(
+  id: string,
+  updates: Partial<
+    Pick<
+      PersonalTodo,
+      "title" | "notes" | "dueAt" | "reminderMinutesBefore" | "isCompleted" | "reminderSentAt"
+    >
+  >
+): Promise<PersonalTodo | null> {
+  if (isPrismaEnabled) {
+    try {
+      const row = await prisma.personalTodo.update({
+        where: { id },
+        data: updates,
+      });
+      return mapPersonalTodoRow(row);
+    } catch (e) {
+      console.warn("Prisma updatePersonalTodo fallback:", e);
+    }
+  }
+
+  const db = readDb();
+  const todo = (db.personalTodos || []).find((t) => t.id === id);
+  if (!todo) return null;
+  Object.assign(todo, updates, { updatedAt: new Date() });
+  writeDb(db);
+  return todo;
+}
+
+export async function deletePersonalTodo(id: string): Promise<boolean> {
+  if (isPrismaEnabled) {
+    try {
+      await prisma.personalTodo.delete({ where: { id } });
+      return true;
+    } catch (e) {
+      console.warn("Prisma deletePersonalTodo fallback:", e);
+    }
+  }
+
+  const db = readDb();
+  const before = (db.personalTodos || []).length;
+  db.personalTodos = (db.personalTodos || []).filter((t) => t.id !== id);
+  writeDb(db);
+  return (db.personalTodos || []).length < before;
+}
+
+// ─── Workspace Posts (a simple social feed scoped to one workspace) ────────
+// DB-only — this is a brand-new feature with no local-JSON fallback data,
+// and that fallback is unreliable on serverless anyway (see notes above on
+// the other entities). If Prisma is unavailable, these are a no-op.
+
+function mapPostRow(
+  row: {
+    id: string;
+    workspaceId: string;
+    authorId: string;
+    content: string;
+    imageUrl: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    comments: {
+      id: string;
+      postId: string;
+      authorId: string;
+      content: string;
+      imageUrl: string | null;
+      createdAt: Date;
+    }[];
+    reactions: { userId: string; type: string }[];
+  },
+  viewerId?: string
+): Post {
+  const likeCount = row.reactions.filter((r) => r.type === "like").length;
+  const dislikeCount = row.reactions.filter((r) => r.type === "dislike").length;
+  const mine = viewerId ? row.reactions.find((r) => r.userId === viewerId) : undefined;
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    authorId: row.authorId,
+    content: row.content,
+    imageUrl: row.imageUrl,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    comments: row.comments
+      .map((c) => ({
+        id: c.id,
+        postId: c.postId,
+        authorId: c.authorId,
+        content: c.content,
+        imageUrl: c.imageUrl,
+        createdAt: c.createdAt,
+      }))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+    likeCount,
+    dislikeCount,
+    myReaction: (mine?.type as "like" | "dislike" | undefined) || null,
+  };
+}
+
+export async function getPosts(workspaceId: string, viewerId?: string): Promise<Post[]> {
+  if (!isPrismaEnabled) return [];
+  try {
+    const rows = await prisma.post.findMany({
+      where: { workspaceId },
+      include: { comments: true, reactions: true },
+      orderBy: { createdAt: "desc" },
+    });
+    return rows.map((r) => mapPostRow(r, viewerId));
+  } catch (e) {
+    console.warn("Prisma getPosts failed:", e);
+    return [];
+  }
+}
+
+export async function createPost(data: {
+  workspaceId: string;
+  authorId: string;
+  content: string;
+  imageUrl?: string | null;
+}): Promise<Post | null> {
+  if (!isPrismaEnabled) return null;
+  try {
+    const row = await prisma.post.create({
+      data: {
+        workspaceId: data.workspaceId,
+        authorId: data.authorId,
+        content: data.content,
+        imageUrl: data.imageUrl || null,
+      },
+      include: { comments: true, reactions: true },
+    });
+    return mapPostRow(row, data.authorId);
+  } catch (e) {
+    console.warn("Prisma createPost failed:", e);
+    return null;
+  }
+}
+
+export async function deletePost(id: string): Promise<boolean> {
+  if (!isPrismaEnabled) return false;
+  try {
+    await prisma.post.delete({ where: { id } });
+    return true;
+  } catch (e) {
+    console.warn("Prisma deletePost failed:", e);
+    return false;
+  }
+}
+
+export async function addPostComment(data: {
+  postId: string;
+  authorId: string;
+  content: string;
+  imageUrl?: string | null;
+}): Promise<Post | null> {
+  if (!isPrismaEnabled) return null;
+  try {
+    await prisma.postComment.create({
+      data: {
+        postId: data.postId,
+        authorId: data.authorId,
+        content: data.content,
+        imageUrl: data.imageUrl || null,
+      },
+    });
+    const row = await prisma.post.findUnique({
+      where: { id: data.postId },
+      include: { comments: true, reactions: true },
+    });
+    return row ? mapPostRow(row, data.authorId) : null;
+  } catch (e) {
+    console.warn("Prisma addPostComment failed:", e);
+    return null;
+  }
+}
+
+export async function setPostReaction(
+  postId: string,
+  userId: string,
+  type: "like" | "dislike"
+): Promise<Post | null> {
+  if (!isPrismaEnabled) return null;
+  try {
+    const existing = await prisma.postReaction.findUnique({
+      where: { postId_userId: { postId, userId } },
+    });
+
+    if (existing && existing.type === type) {
+      // Clicking the same reaction again removes it (toggle off).
+      await prisma.postReaction.delete({ where: { id: existing.id } });
+    } else if (existing) {
+      await prisma.postReaction.update({ where: { id: existing.id }, data: { type } });
+    } else {
+      await prisma.postReaction.create({ data: { postId, userId, type } });
+    }
+
+    const row = await prisma.post.findUnique({
+      where: { id: postId },
+      include: { comments: true, reactions: true },
+    });
+    return row ? mapPostRow(row, userId) : null;
+  } catch (e) {
+    console.warn("Prisma setPostReaction failed:", e);
+    return null;
+  }
+}
+
 // ─── Board Members & Invitations Operations ──────────────────────────────────
 
 export async function getBoardMembers(boardId: string): Promise<User[]> {
@@ -1802,15 +2180,39 @@ export async function acceptBoardInvitation(
     board.updatedAt = new Date();
   }
 
-  // Also ensure targetUser is in workspace.members
-  if (db.workspace && db.workspace.members) {
-    if (!db.workspace.members.some((m) => m.userId === targetUser!.id)) {
-      db.workspace.members.push({
-        userId: targetUser.id,
-        workspaceId: db.workspace.id,
-        role: "member",
-        joinedAt: new Date(),
-      });
+  // Also ensure targetUser is a member of the WORKSPACE THIS BOARD ACTUALLY
+  // BELONGS TO (board.workspaceId) — this used to mutate `db.workspace`,
+  // the local JSON fallback's single "current" workspace, which is neither
+  // guaranteed to be the right one nor ever persisted to Postgres. That
+  // meant an accepted invite silently failed to grant real workspace
+  // access; only the board's memberIds actually got updated.
+  let newMemberEntry: { userId: string; workspaceId: string; role: "member"; joinedAt: Date } | null = null;
+  const targetWorkspace = await getWorkspaceById(board.workspaceId);
+  if (targetWorkspace && !targetWorkspace.members.some((m) => m.userId === targetUser!.id)) {
+    newMemberEntry = {
+      userId: targetUser.id,
+      workspaceId: targetWorkspace.id,
+      role: "member",
+      joinedAt: new Date(),
+    };
+    const updatedMembers = [...targetWorkspace.members, newMemberEntry];
+
+    if (isPrismaEnabled) {
+      try {
+        await prisma.workspace.update({
+          where: { id: targetWorkspace.id },
+          data: { members: updatedMembers as any },
+        });
+      } catch (e) {
+        console.warn("Prisma add workspace member fallback:", e);
+      }
+    }
+
+    const dbWorkspace = (db.workspaces || []).find((w) => w.id === targetWorkspace.id);
+    if (dbWorkspace) {
+      dbWorkspace.members = updatedMembers;
+    } else if (db.workspace?.id === targetWorkspace.id) {
+      db.workspace.members = updatedMembers;
     }
   }
 

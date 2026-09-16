@@ -28,7 +28,6 @@ import {
   FileText,
   Tag,
   FolderKanban,
-  Paperclip as PaperclipIcon,
 } from "lucide-react";
 
 export function MondaySlideOver() {
@@ -203,21 +202,13 @@ export function MondaySlideOver() {
                   : "text-zinc-400 hover:text-white hover:bg-zinc-800/50"
               }`}
             >
-              <Clock className="h-3.5 w-3.5" />
-              <span>Activity Log</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setSlideOverTab("git")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                slideOverTab === "git"
-                  ? "bg-zinc-800 text-white shadow-2xs"
-                  : "text-zinc-400 hover:text-white hover:bg-zinc-800/50"
-              }`}
-            >
-              <PaperclipIcon className="h-3.5 w-3.5" />
-              <span>Files & Subtasks</span>
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span>Comments</span>
+              {taskComments.length > 0 && (
+                <span className="rounded-full bg-zinc-700 px-1.5 text-[10px] font-bold text-zinc-300">
+                  {taskComments.length}
+                </span>
+              )}
             </button>
           </div>
 
@@ -270,10 +261,11 @@ export function MondaySlideOver() {
           </div>
         </div>
 
-        {/* Dual Panel Body: Left (Info & Description) | Right (Item updates) */}
-        <div className="flex-1 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-zinc-800/80">
-          {/* ─── LEFT COLUMN (Cols 1-7): Info, Description, Subtasks ─── */}
-          <div className="lg:col-span-7 p-6 space-y-5 overflow-y-auto">
+        {/* Body: Details tab and Comments tab are separate pages now, not a
+            split-screen — each rendered full width, one at a time. */}
+        <div className="flex-1 overflow-y-auto">
+          {slideOverTab === "details" ? (
+          <div className="max-w-3xl mx-auto p-6 space-y-5">
             {/* Info Widget Box */}
             <div className="rounded-xl border border-zinc-800 bg-[#16181f] p-4 shadow-sm space-y-4">
               <div className="flex items-center justify-between pb-2 border-b border-zinc-800/60">
@@ -474,9 +466,8 @@ export function MondaySlideOver() {
               </form>
             </div>
           </div>
-
-          {/* ─── RIGHT COLUMN (Cols 8-12): Item updates ─── */}
-          <div className="lg:col-span-5 p-6 flex flex-col justify-between space-y-4 bg-[#14151c]">
+          ) : (
+          <div className="max-w-2xl mx-auto p-6 flex flex-col space-y-4">
             <div className="space-y-4">
               <div className="flex items-center justify-between pb-2 border-b border-zinc-800/60">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
@@ -624,6 +615,7 @@ export function MondaySlideOver() {
               </div>
             </div>
           </div>
+          )}
         </div>
       </div>
     </div>

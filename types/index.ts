@@ -212,7 +212,8 @@ export type NotificationType =
   | "assignment"
   | "status_change"
   | "comment"
-  | "due_date";
+  | "due_date"
+  | "todo_reminder";
 
 export interface Notification {
   id: ID;
@@ -224,6 +225,46 @@ export interface Notification {
   boardId: ID | null;
   isRead: boolean;
   createdAt: Date;
+}
+
+// ─── Personal To-Dos (private, per-user, not tied to any workspace/board) ──────
+
+export interface PersonalTodo {
+  id: ID;
+  userId: ID;
+  title: string;
+  notes?: string;
+  dueAt: Date | null;
+  reminderMinutesBefore: number;
+  isCompleted: boolean;
+  reminderSentAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ─── Workspace Posts (a simple social feed scoped to one workspace) ───────────
+
+export interface PostComment {
+  id: ID;
+  postId: ID;
+  authorId: ID;
+  content: string;
+  imageUrl?: string | null;
+  createdAt: Date;
+}
+
+export interface Post {
+  id: ID;
+  workspaceId: ID;
+  authorId: ID;
+  content: string;
+  imageUrl?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  comments: PostComment[];
+  likeCount: number;
+  dislikeCount: number;
+  myReaction: "like" | "dislike" | null;
 }
 
 // ─── Status & Priority Configurations (Universal Monday Style) ────────────────

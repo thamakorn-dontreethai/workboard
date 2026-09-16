@@ -54,7 +54,7 @@ function LoginForm() {
   };
 
   const registerHref = `/register${
-    redirect !== "/board/board-1"
+    redirect !== "/"
       ? `?redirect=${encodeURIComponent(redirect)}${email ? `&email=${encodeURIComponent(email)}` : ""}`
       : email
       ? `?email=${encodeURIComponent(email)}`

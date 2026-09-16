@@ -1,21 +1,17 @@
 "use client";
 
 import React from "react";
-import { Menu, Plus } from "lucide-react";
+import { Menu } from "lucide-react";
 import { Breadcrumbs } from "./Breadcrumbs";
-import { HeaderSearch } from "./HeaderSearch";
 import { NotificationsMenu } from "./NotificationsMenu";
 import { UserMenu } from "./UserMenu";
 import { ThemeToggle } from "../layout/ThemeToggle";
-import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 
 interface HeaderProps {
   onOpenMobileSidebar: () => void;
 }
 
 export function Header({ onOpenMobileSidebar }: HeaderProps) {
-  const { openCreateTaskModal } = useWorkBoard();
-
   return (
     <header
       role="banner"
@@ -35,21 +31,8 @@ export function Header({ onOpenMobileSidebar }: HeaderProps) {
         <Breadcrumbs />
       </div>
 
-      {/* Right side: New Task, Search, Notifications, Theme toggle, User Menu */}
+      {/* Right side: Notifications, Theme toggle, User Menu */}
       <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-        <button
-          type="button"
-          onClick={() => openCreateTaskModal()}
-          className="hidden sm:inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-2xs"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span>New Task</span>
-        </button>
-
-        <HeaderSearch />
-
-        <div className="h-4 w-px bg-border mx-0.5 sm:mx-1 hidden sm:block" />
-
         <NotificationsMenu />
 
         <ThemeToggle />

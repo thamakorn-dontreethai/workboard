@@ -19,14 +19,13 @@ import {
 function RegisterForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") || "/board/board-1";
+  const redirect = searchParams.get("redirect") || "/";
   const initialEmail = searchParams.get("email") || "";
   const initialRole = searchParams.get("role") || "Workspace Owner";
 
   const { register } = useWorkBoard();
 
   const [name, setName] = useState("");
-  const [teamName, setTeamName] = useState("");
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
   const [role, setRole] = useState(initialRole);
@@ -55,7 +54,6 @@ function RegisterForm() {
         email: email.trim(),
         password,
         role,
-        teamName: teamName.trim() || `${name.trim()}'s Team`,
       });
 
       if (res.success) {
@@ -71,7 +69,7 @@ function RegisterForm() {
   };
 
   const loginHref = `/login${
-    redirect !== "/board/board-1"
+    redirect !== "/"
       ? `?redirect=${encodeURIComponent(redirect)}${email ? `&email=${encodeURIComponent(email)}` : ""}`
       : email
       ? `?email=${encodeURIComponent(email)}`
@@ -107,29 +105,6 @@ function RegisterForm() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Jordan Hayes"
-              className="block w-full pl-10 pr-3.5 py-2.5 bg-[#111322] border border-zinc-700/80 rounded-xl text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label
-            htmlFor="teamName"
-            className="block text-xs font-semibold uppercase tracking-wider text-zinc-300 mb-1.5"
-          >
-            Team / Company Name (Optional)
-          </label>
-          <div className="relative rounded-xl shadow-xs">
-            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-500">
-              <Layers className="h-4 w-4" />
-            </div>
-            <input
-              id="teamName"
-              name="teamName"
-              type="text"
-              value={teamName}
-              onChange={(e) => setTeamName(e.target.value)}
-              placeholder="e.g. Acme Studio, Product Team"
               className="block w-full pl-10 pr-3.5 py-2.5 bg-[#111322] border border-zinc-700/80 rounded-xl text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
             />
           </div>

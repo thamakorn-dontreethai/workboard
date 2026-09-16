@@ -8,6 +8,7 @@ import type {
   Comment,
   Activity,
   Notification,
+  PersonalTodo,
   TaskStatus,
   TaskPriority,
 } from "@/types";
@@ -160,6 +161,8 @@ export const MOCK_COMMENTS: Comment[] = [];
 export const MOCK_ACTIVITIES: Activity[] = [];
 
 export const MOCK_NOTIFICATIONS: Notification[] = [];
+
+export const MOCK_PERSONAL_TODOS: PersonalTodo[] = [];
 
 // ─── Data Access Helpers ──────────────────────────────────────────────────────
 

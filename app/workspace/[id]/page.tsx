@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
@@ -11,8 +12,6 @@ import {
   Search,
   Lock,
   Globe,
-  Star,
-  Clock,
   LayoutGrid,
   Shield,
   Trash2,
@@ -30,8 +29,15 @@ import {
   MessageCircleHeart,
   User,
   SquarePen,
-  PanelLeft,
+  ThumbsUp,
+  ThumbsDown,
+  Share2,
+  ImagePlus,
+  Send,
+  X,
 } from "lucide-react";
+import type { Post } from "@/types";
+import { formatDate } from "@/lib/utils/date";
 
 import { CoverColorPicker } from "@/components/workspace/CoverColorPicker";
 import { AvatarCustomizerPicker } from "@/components/workspace/AvatarCustomizerPicker";
@@ -55,6 +61,7 @@ export default function WorkspacePage() {
     currentUser,
     openCreateBoardModal,
     openInviteMemberModal,
+    removeMembers,
   } = useWorkBoard();
 
   // Find target workspace
@@ -72,9 +79,20 @@ export default function WorkspacePage() {
   }, [workspaceId, workspace.id, workspaces, switchWorkspace]);
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<"recent" | "content" | "permissions">(
-    "recent"
+  const [activeTab, setActiveTab] = useState<"posts" | "content" | "permissions">(
+    "posts"
   );
+
+  // ─── Workspace Posts (simple social feed, scoped to this workspace) ────
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [isLoadingPosts, setIsLoadingPosts] = useState(false);
+  const [newPostContent, setNewPostContent] = useState("");
+  const [newPostImage, setNewPostImage] = useState<string | null>(null);
+  const [expandedCommentsPostId, setExpandedCommentsPostId] = useState<string | null>(null);
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [commentImageDrafts, setCommentImageDrafts] = useState<Record<string, string | null>>({});
+  const postImageInputRef = useRef<HTMLInputElement>(null);
+  const commentImageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   // Editable Name State
   const [isEditingName, setIsEditingName] = useState(false);
@@ -92,9 +110,12 @@ export default function WorkspacePage() {
   const [isAvatarPickerOpen, setIsAvatarPickerOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
-  // Search & Starred Boards
+  // Board content search
   const [contentSearch, setContentSearch] = useState("");
-  const [starredBoards, setStarredBoards] = useState<Record<string, boolean>>({});
+
+  // Multi-select on the Member tab, for bulk removal
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [isRemovingMembers, setIsRemovingMembers] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
   const coverRef = useRef<HTMLDivElement>(null);
@@ -107,6 +128,7 @@ export default function WorkspacePage() {
       setNameInput(currentWs.name || "");
       setDescriptionInput(currentWs.description || "");
     }
+    setSelectedMemberIds([]);
   }, [currentWs?.id, currentWs?.name, currentWs?.description]);
 
   // Focus input when editing starts
@@ -186,22 +208,186 @@ export default function WorkspacePage() {
     }
   };
 
-  // Toggle Star / Favorite on Board
-  const toggleStarBoard = (boardId: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setStarredBoards((prev) => ({
-      ...prev,
-      [boardId]: !prev[boardId],
-    }));
-  };
-
   // Boards in this workspace
   const workspaceBoards = boards.filter((b) => b.workspaceId === currentWs?.id);
 
   const filteredBoards = workspaceBoards.filter((b) =>
     b.name.toLowerCase().includes(contentSearch.toLowerCase())
   );
+
+  // ─── Posts feed (scoped to this workspace only) ─────────────────────────
+  const [copiedPostId, setCopiedPostId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!currentWs?.id) return;
+    let cancelled = false;
+    setIsLoadingPosts(true);
+    fetch(
+      `/api/posts?workspaceId=${encodeURIComponent(currentWs.id)}&viewerId=${encodeURIComponent(currentUser.id)}`
+    )
+      .then((r) => r.json())
+      .then((res) => {
+        if (cancelled || !res?.success || !Array.isArray(res.data)) return;
+        setPosts(
+          res.data.map((p: Post) => ({
+            ...p,
+            createdAt: new Date(p.createdAt),
+            updatedAt: new Date(p.updatedAt),
+            comments: p.comments.map((c) => ({ ...c, createdAt: new Date(c.createdAt) })),
+          }))
+        );
+      })
+      .catch((err) => console.error("Failed to load posts:", err))
+      .finally(() => {
+        if (!cancelled) setIsLoadingPosts(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWs?.id, currentUser.id]);
+
+  const readImageAsDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const handlePostImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith("image/")) {
+      setNewPostImage(await readImageAsDataUrl(file));
+    }
+    e.target.value = "";
+  };
+
+  const handleCreatePost = async () => {
+    if (!newPostContent.trim() || !currentWs?.id) return;
+    try {
+      const res = await fetch("/api/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: currentWs.id,
+          authorId: currentUser.id,
+          content: newPostContent.trim(),
+          imageUrl: newPostImage,
+        }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) throw new Error(result?.error);
+      const post: Post = {
+        ...result.data,
+        createdAt: new Date(result.data.createdAt),
+        updatedAt: new Date(result.data.updatedAt),
+        comments: [],
+      };
+      setPosts((prev) => [post, ...prev]);
+      setNewPostContent("");
+      setNewPostImage(null);
+    } catch (err) {
+      console.error("Failed to create post:", err);
+    }
+  };
+
+  const handleReaction = async (postId: string, type: "like" | "dislike") => {
+    try {
+      const res = await fetch(`/api/posts/${postId}/reactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: currentUser.id, type }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) throw new Error(result?.error);
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? {
+                ...result.data,
+                createdAt: new Date(result.data.createdAt),
+                updatedAt: new Date(result.data.updatedAt),
+                comments: result.data.comments.map((c: any) => ({
+                  ...c,
+                  createdAt: new Date(c.createdAt),
+                })),
+              }
+            : p
+        )
+      );
+    } catch (err) {
+      console.error("Failed to react to post:", err);
+    }
+  };
+
+  const handleCommentImageSelect = async (
+    postId: string,
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith("image/")) {
+      const dataUrl = await readImageAsDataUrl(file);
+      setCommentImageDrafts((prev) => ({ ...prev, [postId]: dataUrl }));
+    }
+    e.target.value = "";
+  };
+
+  const handleAddComment = async (postId: string) => {
+    const content = (commentDrafts[postId] || "").trim();
+    const imageUrl = commentImageDrafts[postId] || null;
+    if (!content && !imageUrl) return;
+    try {
+      const res = await fetch(`/api/posts/${postId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authorId: currentUser.id, content: content || " ", imageUrl }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) throw new Error(result?.error);
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? {
+                ...result.data,
+                createdAt: new Date(result.data.createdAt),
+                updatedAt: new Date(result.data.updatedAt),
+                comments: result.data.comments.map((c: any) => ({
+                  ...c,
+                  createdAt: new Date(c.createdAt),
+                })),
+              }
+            : p
+        )
+      );
+      setCommentDrafts((prev) => ({ ...prev, [postId]: "" }));
+      setCommentImageDrafts((prev) => ({ ...prev, [postId]: null }));
+    } catch (err) {
+      console.error("Failed to add comment:", err);
+    }
+  };
+
+  const handleDeletePost = async (postId: string) => {
+    if (!confirm("Delete this post? This can't be undone.")) return;
+    try {
+      const res = await fetch(`/api/posts/${postId}`, { method: "DELETE" });
+      const result = await res.json();
+      if (!result?.success) throw new Error(result?.error);
+      setPosts((prev) => prev.filter((p) => p.id !== postId));
+    } catch (err) {
+      console.error("Failed to delete post:", err);
+    }
+  };
+
+  const handleSharePost = async (postId: string) => {
+    const url = `${window.location.origin}/workspace/${currentWs.id}?post=${postId}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedPostId(postId);
+      setTimeout(() => setCopiedPostId((cur) => (cur === postId ? null : cur)), 2000);
+    } catch (err) {
+      console.error("Failed to copy share link:", err);
+    }
+  };
 
   const rawCover = currentWs?.coverColor || "bg-white";
   const isCustomImage = rawCover.startsWith("custom-image:");
@@ -451,13 +637,13 @@ export default function WorkspacePage() {
             </div>
           </div>
 
-          {/* ─── 3. TABS (Recents | Content | Permissions) ───────────────────── */}
+          {/* ─── 3. TABS (Posts | Content | Member) ─────────────────────────── */}
           <div className="flex items-center border-b border-zinc-600 mt-8">
             {(
               [
-                { id: "recent", label: "Recents", icon: Clock },
+                { id: "posts", label: "Posts", icon: MessageSquare },
                 { id: "content", label: "Content", icon: SquarePen },
-                { id: "permissions", label: "Permissions", icon: Lock },
+                { id: "permissions", label: "Member", icon: Lock },
               ] as const
             ).map(({ id, label, icon: Icon }) => (
               <button
@@ -483,87 +669,287 @@ export default function WorkspacePage() {
       {/* ─── 4. BOARD LIST (Exact Match to User's Photo) ─────────────────────── */}
       <div className="px-16 flex-1">
         <div className="w-full">
-          {/* TAB 1: RECENTS (Clean Rows with Star) */}
-          {/* Empty workspace: Add new board / Start with a template */}
-          {activeTab === "recent" && workspaceBoards.length === 0 && (
-            <div className="pt-6 space-y-5">
-              <p className="text-[15px] font-medium text-white">
-                Welcome to your new workspace
-              </p>
-              <div className="flex flex-wrap gap-5">
-                <button
-                  type="button"
-                  onClick={openCreateBoardModal}
-                  className="group flex flex-col gap-2 text-left cursor-pointer"
-                >
-                  <div className="flex h-[108px] w-[170px] items-center justify-center rounded-lg border border-zinc-700 bg-[#1e1f21] group-hover:border-zinc-400 transition-colors">
-                    <Plus className="h-10 w-10 text-white stroke-[1.5]" />
-                  </div>
-                  <span className="text-sm text-zinc-200">Add new board</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={openCreateBoardModal}
-                  className="group flex flex-col gap-2 text-left cursor-pointer"
-                >
-                  <div className="flex h-[108px] w-[170px] items-center justify-center rounded-lg border border-zinc-700 bg-[#1e1f21] group-hover:border-zinc-400 transition-colors">
-                    <div className="w-[110px] rounded bg-white p-2 space-y-1.5 shadow">
-                      <div className="h-2 w-12 rounded-sm bg-rose-500" />
-                      <div className="h-1.5 rounded-sm bg-zinc-200" />
-                      <div className="h-1.5 rounded-sm bg-zinc-200" />
-                      <div className="h-1.5 w-2/3 rounded-sm bg-zinc-200" />
-                    </div>
-                  </div>
-                  <span className="text-sm text-zinc-200">Start with a template</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "recent" && workspaceBoards.length > 0 && (
-            <div className="pt-6">
-              {filteredBoards.map((b) => {
-                const isStarred = Boolean(starredBoards[b.id]);
-                return (
-                  <Link
-                    key={b.id}
-                    href={`/board/${b.id}`}
-                    className="group flex items-center justify-between py-4 px-7 mx-1 border-b border-zinc-700 hover:bg-white/5 transition-colors cursor-pointer"
+          {/* TAB: POSTS — a simple social feed scoped to this workspace only */}
+          {activeTab === "posts" && (
+            <div className="pt-6 pb-10 max-w-2xl mx-auto space-y-5">
+              {/* Composer */}
+              <div className="rounded-2xl border border-zinc-800 bg-[#1a1b1e] p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-bold text-xs text-white ${currentUser.avatarColor || "bg-indigo-600"}`}
                   >
-                    {/* Left: Icon + Board Name */}
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="relative shrink-0">
-                        <PanelLeft className="h-4 w-4 text-zinc-300" />
-                        {b.privacy === "private" && (
-                          <Lock className="absolute -bottom-1 -right-1 h-2.5 w-2.5 text-zinc-300 bg-[#141414] rounded-sm" />
+                    {currentUser.avatarInitials}
+                  </div>
+                  <textarea
+                    value={newPostContent}
+                    onChange={(e) => setNewPostContent(e.target.value)}
+                    placeholder={`Share an update with ${currentWs.name}...`}
+                    rows={2}
+                    className="flex-1 resize-none bg-transparent text-sm text-white placeholder:text-zinc-500 focus:outline-none leading-relaxed pt-1.5"
+                  />
+                </div>
+
+                {newPostImage && (
+                  <div className="relative ml-12 inline-block">
+                    <img
+                      src={newPostImage}
+                      alt="Attached"
+                      className="max-h-48 rounded-xl border border-zinc-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setNewPostImage(null)}
+                      className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white transition-colors"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-2 border-t border-zinc-800 ml-12">
+                  <input
+                    ref={postImageInputRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={handlePostImageSelect}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => postImageInputRef.current?.click()}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                  >
+                    <ImagePlus className="h-4 w-4" />
+                    <span>Photo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreatePost}
+                    disabled={!newPostContent.trim()}
+                    className="px-4 py-1.5 rounded-lg bg-[#0073ea] hover:bg-[#0060c0] disabled:opacity-40 disabled:hover:bg-[#0073ea] text-white text-xs font-semibold transition-colors"
+                  >
+                    Post
+                  </button>
+                </div>
+              </div>
+
+              {/* Feed */}
+              {isLoadingPosts ? (
+                <div className="py-16 text-center text-xs text-zinc-500">Loading posts...</div>
+              ) : posts.length === 0 ? (
+                <div className="py-16 text-center rounded-2xl border border-dashed border-zinc-800 space-y-2">
+                  <MessageSquare className="h-8 w-8 text-zinc-600 mx-auto" />
+                  <p className="text-sm font-semibold text-zinc-300">No posts yet</p>
+                  <p className="text-xs text-zinc-500">
+                    Be the first to share something with this workspace.
+                  </p>
+                </div>
+              ) : (
+                posts.map((post) => {
+                  const author = users.find((u) => u.id === post.authorId);
+                  const isExpanded = expandedCommentsPostId === post.id;
+                  return (
+                    <div
+                      key={post.id}
+                      className="rounded-2xl border border-zinc-800 bg-[#1a1b1e] overflow-hidden"
+                    >
+                      <div className="p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className={`flex h-8 w-8 items-center justify-center rounded-full font-bold text-xs text-white ${author?.avatarColor || "bg-indigo-600"}`}
+                            >
+                              {author?.avatarInitials || "?"}
+                            </div>
+                            <div>
+                              <div className="text-sm font-semibold text-white">
+                                {author?.name || "Unknown"}
+                              </div>
+                              <div className="text-[11px] text-zinc-500">
+                                {formatDate(post.createdAt)}
+                              </div>
+                            </div>
+                          </div>
+                          {post.authorId === currentUser.id && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePost(post.id)}
+                              title="Delete post"
+                              className="text-zinc-500 hover:text-rose-400 transition-colors"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        <p className="text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap">
+                          {post.content}
+                        </p>
+
+                        {post.imageUrl && (
+                          <img
+                            src={post.imageUrl}
+                            alt=""
+                            className="w-full max-h-96 object-cover rounded-xl border border-zinc-800"
+                          />
                         )}
                       </div>
-                      <span className="text-sm text-white group-hover:text-[#57b6ff] transition-colors truncate">
-                        {b.name}
-                      </span>
-                    </div>
 
-                    {/* Right: Star Outline */}
-                    <div className="flex items-center">
-                      <button
-                        type="button"
-                        onClick={(e) => toggleStarBoard(b.id, e)}
-                        className={`p-1 rounded transition-colors cursor-pointer ${isStarred
-                          ? "text-amber-400"
-                          : "text-zinc-300 hover:text-white"
-                          }`}
-                        title={isStarred ? "Starred" : "Star"}
-                      >
-                        <Star
-                          className={`h-5 w-5 ${isStarred ? "fill-amber-400 text-amber-400" : ""
-                            }`}
-                        />
-                      </button>
+                      <div className="flex items-center gap-1 px-4 py-2 border-t border-zinc-800/80">
+                        <button
+                          type="button"
+                          onClick={() => handleReaction(post.id, "like")}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${post.myReaction === "like" ? "text-[#57b6ff] bg-[#0073ea]/10" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}
+                        >
+                          <ThumbsUp
+                            className={`h-3.5 w-3.5 ${post.myReaction === "like" ? "fill-current" : ""}`}
+                          />
+                          <span>{post.likeCount > 0 ? post.likeCount : "Like"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleReaction(post.id, "dislike")}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${post.myReaction === "dislike" ? "text-rose-400 bg-rose-500/10" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}
+                        >
+                          <ThumbsDown
+                            className={`h-3.5 w-3.5 ${post.myReaction === "dislike" ? "fill-current" : ""}`}
+                          />
+                          {post.dislikeCount > 0 && <span>{post.dislikeCount}</span>}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedCommentsPostId(isExpanded ? null : post.id)
+                          }
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${isExpanded ? "text-white bg-zinc-800" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}
+                        >
+                          <MessageSquare className="h-3.5 w-3.5" />
+                          <span>{post.comments.length > 0 ? post.comments.length : "Comment"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSharePost(post.id)}
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors ml-auto"
+                        >
+                          <Share2 className="h-3.5 w-3.5" />
+                          <span>{copiedPostId === post.id ? "Link copied!" : "Share"}</span>
+                        </button>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="border-t border-zinc-800/80 bg-[#161719] p-4 space-y-3">
+                          {post.comments.map((c) => {
+                            const commentAuthor = users.find((u) => u.id === c.authorId);
+                            return (
+                              <div key={c.id} className="flex items-start gap-2.5">
+                                <div
+                                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-bold text-[10px] text-white ${commentAuthor?.avatarColor || "bg-indigo-600"}`}
+                                >
+                                  {commentAuthor?.avatarInitials || "?"}
+                                </div>
+                                <div className="min-w-0 flex-1 space-y-1">
+                                  <div className="rounded-2xl bg-zinc-800/70 px-3 py-2">
+                                    <div className="text-xs font-semibold text-white">
+                                      {commentAuthor?.name || "Unknown"}
+                                    </div>
+                                    {c.content.trim() && (
+                                      <p className="text-xs text-zinc-200 mt-0.5 whitespace-pre-wrap">
+                                        {c.content}
+                                      </p>
+                                    )}
+                                  </div>
+                                  {c.imageUrl && (
+                                    <img
+                                      src={c.imageUrl}
+                                      alt=""
+                                      className="max-h-40 rounded-xl border border-zinc-800"
+                                    />
+                                  )}
+                                  <div className="text-[10px] text-zinc-500 pl-3">
+                                    {formatDate(c.createdAt)}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {/* Add comment */}
+                          <div className="flex items-start gap-2.5 pt-1">
+                            <div
+                              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-bold text-[10px] text-white ${currentUser.avatarColor || "bg-indigo-600"}`}
+                            >
+                              {currentUser.avatarInitials}
+                            </div>
+                            <div className="min-w-0 flex-1 space-y-1.5">
+                              {commentImageDrafts[post.id] && (
+                                <div className="relative inline-block">
+                                  <img
+                                    src={commentImageDrafts[post.id]!}
+                                    alt="Attached"
+                                    className="max-h-32 rounded-lg border border-zinc-700"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setCommentImageDrafts((prev) => ({ ...prev, [post.id]: null }))
+                                    }
+                                    className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white transition-colors"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900/60 pl-3 pr-1.5 py-1">
+                                <input
+                                  type="text"
+                                  value={commentDrafts[post.id] || ""}
+                                  onChange={(e) =>
+                                    setCommentDrafts((prev) => ({ ...prev, [post.id]: e.target.value }))
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") handleAddComment(post.id);
+                                  }}
+                                  placeholder="Write a comment..."
+                                  className="flex-1 bg-transparent text-xs text-white placeholder:text-zinc-500 focus:outline-none"
+                                />
+                                <input
+                                  ref={(el) => {
+                                    commentImageInputRefs.current[post.id] = el;
+                                  }}
+                                  type="file"
+                                  accept="image/*"
+                                  hidden
+                                  onChange={(e) => handleCommentImageSelect(post.id, e)}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => commentImageInputRefs.current[post.id]?.click()}
+                                  title="Attach image"
+                                  className="p-1 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                                >
+                                  <ImagePlus className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddComment(post.id)}
+                                  disabled={
+                                    !(commentDrafts[post.id] || "").trim() &&
+                                    !commentImageDrafts[post.id]
+                                  }
+                                  title="Send"
+                                  className="p-1.5 rounded-full bg-[#0073ea] hover:bg-[#0060c0] disabled:opacity-30 text-white transition-colors"
+                                >
+                                  <Send className="h-3 w-3" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </Link>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           )}
 
@@ -615,57 +1001,162 @@ export default function WorkspacePage() {
             </div>
           )}
 
-          {/* TAB 3: PERMISSIONS */}
-          {activeTab === "permissions" && (
-            <div className="py-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">
-                  Workspace Members
-                </h3>
-                <button
-                  type="button"
-                  onClick={openInviteMemberModal}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0073ea] hover:bg-[#0060c0] text-white text-xs font-semibold transition-colors"
-                >
-                  <UserPlus className="h-3.5 w-3.5" />
-                  <span>Invite Members</span>
-                </button>
-              </div>
+          {/* TAB 3: PERMISSIONS (Member) */}
+          {activeTab === "permissions" && (() => {
+            const removableMembers = (currentWs.members || []).filter(
+              (m) => m.userId !== currentUser.id
+            );
+            const allRemovableSelected =
+              removableMembers.length > 0 &&
+              removableMembers.every((m) => selectedMemberIds.includes(m.userId));
 
-              <div className="divide-y divide-zinc-800/60">
-                {users.map((u) => {
-                  const isOwner =
-                    u.role?.toLowerCase().includes("owner") ||
-                    u.role?.toLowerCase().includes("manager");
-                  return (
-                    <div
-                      key={u.id}
-                      className="flex items-center justify-between py-2.5 px-1"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`flex h-6 w-6 items-center justify-center rounded-full font-bold text-xs text-white ${u.avatarColor || "bg-indigo-600"
-                            }`}
-                        >
-                          {u.avatarInitials || u.name.charAt(0)}
-                        </div>
-                        <div>
-                          <div className="text-xs font-medium text-white">
-                            {u.name}
+            const toggleSelectMember = (userId: string) => {
+              setSelectedMemberIds((prev) =>
+                prev.includes(userId)
+                  ? prev.filter((id) => id !== userId)
+                  : [...prev, userId]
+              );
+            };
+
+            const toggleSelectAllMembers = () => {
+              setSelectedMemberIds(
+                allRemovableSelected ? [] : removableMembers.map((m) => m.userId)
+              );
+            };
+
+            const handleRemoveSelected = async () => {
+              const count = selectedMemberIds.length;
+              if (count === 0) return;
+              if (
+                !confirm(
+                  `Remove ${count} member${count === 1 ? "" : "s"} from this workspace?`
+                )
+              ) {
+                return;
+              }
+              setIsRemovingMembers(true);
+              try {
+                await removeMembers(selectedMemberIds);
+                setSelectedMemberIds([]);
+              } finally {
+                setIsRemovingMembers(false);
+              }
+            };
+
+            return (
+              <div className="py-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {removableMembers.length > 0 && (
+                      <input
+                        type="checkbox"
+                        checked={allRemovableSelected}
+                        onChange={toggleSelectAllMembers}
+                        title="Select all"
+                        className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 cursor-pointer accent-[#0073ea]"
+                      />
+                    )}
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                      Workspace Members
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openInviteMemberModal}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0073ea] hover:bg-[#0060c0] text-white text-xs font-semibold transition-colors"
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    <span>Invite Members</span>
+                  </button>
+                </div>
+
+                <div className="divide-y divide-zinc-800/60">
+                  {(currentWs.members || []).map((member) => {
+                    const u = users.find((usr) => usr.id === member.userId);
+                    if (!u) return null;
+                    const roleLabel =
+                      member.role.charAt(0).toUpperCase() + member.role.slice(1);
+                    const isSelf = member.userId === currentUser.id;
+                    const isSelected = selectedMemberIds.includes(member.userId);
+                    return (
+                      <div
+                        key={member.userId}
+                        className={`flex items-center justify-between py-2.5 px-1 rounded-lg transition-colors ${isSelected ? "bg-[#0073ea]/5" : ""}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            disabled={isSelf}
+                            onChange={() => toggleSelectMember(member.userId)}
+                            title={isSelf ? "You can't remove yourself" : "Select"}
+                            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 cursor-pointer accent-[#0073ea] disabled:opacity-30 disabled:cursor-not-allowed"
+                          />
+                          <div
+                            className={`flex h-6 w-6 items-center justify-center rounded-full font-bold text-xs text-white ${u.avatarColor || "bg-indigo-600"
+                              }`}
+                          >
+                            {u.avatarInitials || u.name.charAt(0)}
                           </div>
-                          <div className="text-[10px] text-zinc-500">{u.email}</div>
+                          <div>
+                            <div className="text-xs font-medium text-white">
+                              {u.name}
+                              {isSelf && (
+                                <span className="text-zinc-500 font-normal"> (you)</span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-zinc-500">{u.email}</div>
+                          </div>
                         </div>
-                      </div>
 
-                      <span className="text-xs text-zinc-400 font-medium">
-                        {isOwner ? "Owner" : "Member"}
-                      </span>
-                    </div>
-                  );
-                })}
+                        <span className="text-xs text-zinc-400 font-medium">
+                          {roleLabel}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Floating bulk-action bar — portal'd to <body> so it
+                    floats above everything regardless of scroll position. */}
+                {selectedMemberIds.length > 0 &&
+                  createPortal(
+                    <div className="fixed inset-x-0 bottom-5 z-50 flex justify-center px-4 pointer-events-none animate-in slide-in-from-bottom-2 fade-in duration-200">
+                      <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-zinc-700 bg-[#1c1e28] pl-4 pr-2 py-2 shadow-2xl shadow-black/40">
+                        <span className="flex items-center gap-2 pr-3 mr-1 border-r border-zinc-700 text-xs font-semibold text-white whitespace-nowrap">
+                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0073ea] px-1.5 text-[11px] font-bold text-white">
+                            {selectedMemberIds.length}
+                          </span>
+                          <span>selected</span>
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={handleRemoveSelected}
+                          disabled={isRemovingMembers}
+                          className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 transition-colors disabled:opacity-40"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>{isRemovingMembers ? "Removing..." : "Remove from workspace"}</span>
+                        </button>
+
+                        <div className="mx-1 h-5 w-px bg-zinc-700" />
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedMemberIds([])}
+                          title="Clear selection"
+                          className="flex items-center justify-center h-7 w-7 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>,
+                    document.body
+                  )}
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       </div>
 

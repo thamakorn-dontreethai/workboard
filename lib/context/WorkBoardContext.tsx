@@ -20,6 +20,7 @@ import type {
   Comment,
   Activity,
   Notification,
+  PersonalTodo,
   TaskStatus,
   TaskPriority,
 } from "@/types";
@@ -78,8 +79,8 @@ interface WorkBoardContextType {
 
   // Active Modals & SlideOver
   activeTaskId: string | null;
-  slideOverTab: "details" | "activity" | "git";
-  setSlideOverTab: (tab: "details" | "activity" | "git") => void;
+  slideOverTab: "details" | "activity";
+  setSlideOverTab: (tab: "details" | "activity") => void;
   isCreateTaskOpen: boolean;
   createTaskDefaultBoardId?: string;
   createTaskDefaultGroupId?: string;
@@ -96,7 +97,6 @@ interface WorkBoardContextType {
     password: string;
     role?: string;
     department?: string;
-    teamName?: string;
   }) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   switchUser: (userId: string) => void;
@@ -131,7 +131,9 @@ interface WorkBoardContextType {
   lastCreatedTaskId: string | null;
   clearLastCreatedTaskId: () => void;
   deleteTask: (taskId: string) => void;
+  deleteTasks: (taskIds: string[]) => void;
   moveTaskToGroup: (taskId: string, newGroupId: string) => void;
+  moveTasksToGroup: (taskIds: string[], newGroupId: string) => void;
   voteItem: (taskId: string) => void;
 
   // Actions - Groups
@@ -157,13 +159,31 @@ interface WorkBoardContextType {
     role: "owner" | "admin" | "member" | "viewer"
   ) => void;
   removeMember: (userId: string) => void;
+  removeMembers: (userIds: string[]) => Promise<void>;
 
   // Actions - Notifications
   markNotificationAsRead: (id: string) => void;
   markAllNotificationsAsRead: () => void;
 
+  // Personal To-Dos (private, per-user, not tied to any workspace/board)
+  personalTodos: PersonalTodo[];
+  createPersonalTodo: (data: {
+    title: string;
+    notes?: string;
+    dueAt?: Date | null;
+    reminderMinutesBefore?: number;
+  }) => Promise<PersonalTodo>;
+  updatePersonalTodo: (
+    id: string,
+    updates: Partial<
+      Pick<PersonalTodo, "title" | "notes" | "dueAt" | "reminderMinutesBefore" | "isCompleted">
+    >
+  ) => void;
+  toggleTodoComplete: (id: string) => void;
+  deletePersonalTodo: (id: string) => void;
+
   // Modal Triggers
-  openTaskModal: (taskId: string, tab?: "details" | "activity" | "git") => void;
+  openTaskModal: (taskId: string, tab?: "details" | "activity") => void;
   closeTaskModal: () => void;
   openCreateTaskModal: (boardId?: string, groupId?: string, defaultDueDate?: Date | null) => void;
   closeCreateTaskModal: () => void;
@@ -251,6 +271,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [personalTodos, setPersonalTodos] = useState<PersonalTodo[]>([]);
   // The most recently created task, so the board table can highlight it and
   // drop straight into inline title-editing — matches monday.com's "New
   // item" behavior instead of silently adding a row nobody notices.
@@ -262,7 +283,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   // Modal State
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [slideOverTab, setSlideOverTab] = useState<"details" | "activity" | "git">("details");
+  const [slideOverTab, setSlideOverTab] = useState<"details" | "activity">("details");
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [createTaskDefaultBoardId, setCreateTaskDefaultBoardId] = useState<
     string | undefined
@@ -304,16 +325,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
     async function hydrateFromServer() {
       try {
-        let activeWorkspaceIdHint: string | null = null;
-        try {
-          activeWorkspaceIdHint = localStorage.getItem(ACTIVE_WORKSPACE_KEY);
-        } catch {
-          // ignore — localStorage unavailable
-        }
-
-        const [wsRes, boardsRes, groupsRes, tasksRes, commentsRes, subtasksRes, activitiesRes] =
+        // Workspaces are hydrated separately, once the signed-in user is
+        // known — see the per-user effect below. Fetching them here
+        // unconditionally used to return every workspace in the database,
+        // including ones this user was never invited to.
+        const [boardsRes, groupsRes, tasksRes, commentsRes, subtasksRes, activitiesRes] =
           await Promise.all([
-            fetch("/api/workspaces").then((r) => r.json()).catch(() => null),
             fetch("/api/boards").then((r) => r.json()).catch(() => null),
             fetch("/api/groups").then((r) => r.json()).catch(() => null),
             fetch("/api/tasks").then((r) => r.json()).catch(() => null),
@@ -323,15 +340,6 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           ]);
 
         if (cancelled) return;
-
-        if (wsRes?.success && Array.isArray(wsRes.workspaces) && wsRes.workspaces.length > 0) {
-          const list: Workspace[] = wsRes.workspaces;
-          setWorkspaces(list);
-          const preferred = activeWorkspaceIdHint
-            ? list.find((w) => w.id === activeWorkspaceIdHint)
-            : undefined;
-          setWorkspace(preferred || wsRes.data || list[0]);
-        }
 
         if (boardsRes?.success && Array.isArray(boardsRes.data)) {
           setBoards(boardsRes.data);
@@ -394,12 +402,36 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // ─── Notifications: hydrate per-user once the signed-in user is known ────
-  // Runs again whenever the user changes (login/switch), not just once on
-  // mount — unlike workspaces/boards/tasks, this data IS user-specific.
+  // ─── Workspaces, notifications, personal to-dos: hydrate per-user once ───
+  // the signed-in user is known. Runs again whenever the user changes
+  // (login/switch), not just once on mount — unlike boards/tasks (which
+  // aren't scoped per-user yet), this data IS user-specific: workspaces in
+  // particular must only include ones this user is actually a member of.
   useEffect(() => {
     if (!isAuthenticated || !currentUser?.id) return;
     let cancelled = false;
+
+    let activeWorkspaceIdHint: string | null = null;
+    try {
+      activeWorkspaceIdHint = localStorage.getItem(ACTIVE_WORKSPACE_KEY);
+    } catch {
+      // ignore — localStorage unavailable
+    }
+
+    fetch(`/api/workspaces?userId=${encodeURIComponent(currentUser.id)}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (cancelled || !res?.success || !Array.isArray(res.workspaces)) return;
+        const list: Workspace[] = res.workspaces;
+        setWorkspaces(list);
+        if (list.length > 0) {
+          const preferred = activeWorkspaceIdHint
+            ? list.find((w) => w.id === activeWorkspaceIdHint)
+            : undefined;
+          setWorkspace(preferred || res.data || list[0]);
+        }
+      })
+      .catch((err) => console.error("Failed to hydrate workspaces:", err));
 
     fetch(`/api/notifications?userId=${encodeURIComponent(currentUser.id)}`)
       .then((r) => r.json())
@@ -413,6 +445,22 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         );
       })
       .catch((err) => console.error("Failed to hydrate notifications:", err));
+
+    fetch(`/api/todos?userId=${encodeURIComponent(currentUser.id)}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (cancelled || !res?.success || !Array.isArray(res.data)) return;
+        setPersonalTodos(
+          res.data.map((t: PersonalTodo) => ({
+            ...t,
+            dueAt: t.dueAt ? new Date(t.dueAt) : null,
+            reminderSentAt: t.reminderSentAt ? new Date(t.reminderSentAt) : null,
+            createdAt: new Date(t.createdAt),
+            updatedAt: new Date(t.updatedAt),
+          }))
+        );
+      })
+      .catch((err) => console.error("Failed to hydrate personal to-dos:", err));
 
     return () => {
       cancelled = true;
@@ -550,7 +598,6 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       password: string;
       role?: string;
       department?: string;
-      teamName?: string;
     }): Promise<{ success: boolean; error?: string }> => {
       try {
         const res = await fetch("/api/auth/register", {
@@ -569,25 +616,17 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           const newUsers = [...users.filter((u) => u.id !== newUser.id), newUser];
           setUsers(newUsers);
 
-          // Give the registered user ownership of their team
-          const teamTitle = userData.teamName || `${newUser.name}'s Team`;
-          const updatedWorkspace: Workspace = {
-            ...workspace,
-            name: teamTitle,
-            members: [
-              ...workspace.members.filter((m) => m.userId !== newUser.id),
-              {
-                userId: newUser.id,
-                workspaceId: workspace.id,
-                role: "owner",
-                joinedAt: new Date(),
-              },
-            ],
-          };
-          setWorkspace(updatedWorkspace);
+          // Deliberately create no workspace here — a brand-new account
+          // starts with none. The per-user hydration effect will fetch
+          // this user's real workspace list right after (correctly empty,
+          // unless they registered via an invite link and then accept it,
+          // in which case that workspace shows up once accepted). The
+          // "Add workspace" / "Browse all" actions in the sidebar are how
+          // they create or discover one from here.
+          setWorkspaces([]);
 
           // Persist auth session to localStorage
-          persistState(newUsers, updatedWorkspace, tasks, activities, notifications, newUser, groups, boards, true);
+          persistState(newUsers, workspace, tasks, activities, notifications, newUser, groups, boards, true);
           return { success: true };
         }
         return { success: false, error: data.error || "Registration failed" };
@@ -1056,6 +1095,36 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     [tasks, activeTaskId, users, workspace, activities, notifications, currentUser, persistState]
   );
 
+  // Deletes several tasks in one state update — same reasoning as
+  // moveTasksToGroup: looping deleteTask reads the same stale `tasks`
+  // closure each time and overwrites state with a plain value instead of
+  // an updater function, so only the last call in the loop actually sticks.
+  const deleteTasks = useCallback(
+    (taskIds: string[]) => {
+      const idSet = new Set(taskIds);
+      if (idSet.size === 0) return;
+
+      const updatedTasks = tasks.filter((t) => !idSet.has(t.id));
+      setTasks(updatedTasks);
+      if (activeTaskId && idSet.has(activeTaskId)) setActiveTaskId(null);
+      persistState(
+        users,
+        workspace,
+        updatedTasks,
+        activities,
+        notifications,
+        currentUser
+      );
+
+      taskIds.forEach((id) => {
+        fetch(`/api/tasks/${id}`, { method: "DELETE" }).catch((err) =>
+          console.error("Failed to delete task:", err)
+        );
+      });
+    },
+    [tasks, activeTaskId, users, workspace, activities, notifications, currentUser, persistState]
+  );
+
   const moveTaskToGroup = useCallback(
     (taskId: string, newGroupId: string) => {
       const task = tasks.find((t) => t.id === taskId);
@@ -1082,6 +1151,55 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ groupId: newGroupId, order: newOrder, actorId: currentUser.id }),
       }).catch((err) => console.error("Failed to persist group move:", err));
+    },
+    [tasks, users, workspace, activities, notifications, currentUser, persistState]
+  );
+
+  // Moves several tasks to a group in one state update. Calling
+  // moveTaskToGroup in a loop doesn't work for this: each call reads the
+  // same stale `tasks` closure and calls setTasks with a plain object (not
+  // an updater function), so only the last call in the loop actually wins.
+  const moveTasksToGroup = useCallback(
+    (taskIds: string[], newGroupId: string) => {
+      const idsToMove = taskIds.filter((id) => {
+        const t = tasks.find((task) => task.id === id);
+        return t && t.groupId !== newGroupId;
+      });
+      if (idsToMove.length === 0) return;
+
+      let nextOrder = tasks.filter((t) => t.groupId === newGroupId).length;
+      const orderById = new Map<string, number>();
+      idsToMove.forEach((id) => {
+        orderById.set(id, nextOrder);
+        nextOrder += 1;
+      });
+
+      const updatedTasks = tasks.map((t) =>
+        orderById.has(t.id)
+          ? { ...t, groupId: newGroupId, order: orderById.get(t.id)!, updatedAt: new Date() }
+          : t
+      );
+      setTasks(updatedTasks);
+      persistState(
+        users,
+        workspace,
+        updatedTasks,
+        activities,
+        notifications,
+        currentUser
+      );
+
+      idsToMove.forEach((id) => {
+        fetch(`/api/tasks/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            groupId: newGroupId,
+            order: orderById.get(id),
+            actorId: currentUser.id,
+          }),
+        }).catch((err) => console.error("Failed to persist group move:", err));
+      });
     },
     [tasks, users, workspace, activities, notifications, currentUser, persistState]
   );
@@ -1419,31 +1537,41 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     [workspace, users, tasks, activities, notifications, currentUser, persistState]
   );
 
+  // Removes one or more people from THIS workspace only — this used to
+  // delete the user from the global `users` list (i.e. their entire
+  // account, workspace-wide) and never actually persisted anywhere beyond
+  // localStorage, since persistState no longer writes workspace data.
+  const removeMembers = useCallback(
+    async (userIds: string[]) => {
+      const idSet = new Set(userIds.filter((id) => id !== currentUser.id));
+      if (idSet.size === 0) return;
+
+      const updatedMembers = workspace.members.filter((m) => !idSet.has(m.userId));
+      try {
+        const res = await fetch(`/api/workspaces/${workspace.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ members: updatedMembers }),
+        });
+        const result = await res.json();
+        if (!result?.success || !result?.data) {
+          throw new Error(result?.error || "Failed to remove member");
+        }
+        const updated: Workspace = result.data;
+        setWorkspace(updated);
+        setWorkspaces((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
+      } catch (err) {
+        console.error("Failed to remove member(s):", err);
+      }
+    },
+    [currentUser.id, workspace]
+  );
+
   const removeMember = useCallback(
     (userId: string) => {
-      if (userId === currentUser.id) return;
-      const updatedWorkspace: Workspace = {
-        ...workspace,
-        members: workspace.members.filter((m) => m.userId !== userId),
-      };
-      const updatedUsers = users.filter((u) => u.id !== userId);
-      const updatedTasks = tasks.map((t) =>
-        t.assigneeId === userId ? { ...t, assigneeId: null } : t
-      );
-
-      setWorkspace(updatedWorkspace);
-      setUsers(updatedUsers);
-      setTasks(updatedTasks);
-      persistState(
-        updatedUsers,
-        updatedWorkspace,
-        updatedTasks,
-        activities,
-        notifications,
-        currentUser
-      );
+      removeMembers([userId]);
     },
-    [currentUser.id, workspace, users, tasks, activities, notifications, persistState]
+    [removeMembers]
   );
 
   const markNotificationAsRead = useCallback((id: string) => {
@@ -1466,8 +1594,162 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     }).catch((err) => console.error("Failed to persist notifications read state:", err));
   }, [currentUser.id]);
 
+  // ─── Personal To-Dos (private, per-user; not tied to any workspace/board) ─
+
+  const createPersonalTodo = useCallback(
+    async (data: {
+      title: string;
+      notes?: string;
+      dueAt?: Date | null;
+      reminderMinutesBefore?: number;
+    }): Promise<PersonalTodo> => {
+      if (
+        typeof window !== "undefined" &&
+        data.dueAt &&
+        "Notification" in window &&
+        Notification.permission === "default"
+      ) {
+        Notification.requestPermission().catch(() => {});
+      }
+
+      const res = await fetch("/api/todos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          title: data.title,
+          notes: data.notes,
+          dueAt: data.dueAt ? data.dueAt.toISOString() : null,
+          reminderMinutesBefore: data.reminderMinutesBefore,
+        }),
+      });
+      const result = await res.json();
+      if (!result?.success) {
+        throw new Error(result?.error || "Failed to create to-do");
+      }
+
+      const newTodo: PersonalTodo = {
+        ...result.data,
+        dueAt: result.data.dueAt ? new Date(result.data.dueAt) : null,
+        reminderSentAt: result.data.reminderSentAt ? new Date(result.data.reminderSentAt) : null,
+        createdAt: new Date(result.data.createdAt),
+        updatedAt: new Date(result.data.updatedAt),
+      };
+      setPersonalTodos((prev) => [...prev, newTodo]);
+      return newTodo;
+    },
+    [currentUser.id]
+  );
+
+  const updatePersonalTodo = useCallback(
+    (
+      id: string,
+      updates: Partial<
+        Pick<
+          PersonalTodo,
+          "title" | "notes" | "dueAt" | "reminderMinutesBefore" | "isCompleted" | "reminderSentAt"
+        >
+      >
+    ) => {
+      setPersonalTodos((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, ...updates, updatedAt: new Date() } : t))
+      );
+
+      fetch(`/api/todos/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...updates,
+          dueAt:
+            updates.dueAt !== undefined
+              ? updates.dueAt
+                ? updates.dueAt.toISOString()
+                : null
+              : undefined,
+          reminderSentAt:
+            updates.reminderSentAt !== undefined
+              ? updates.reminderSentAt
+                ? updates.reminderSentAt.toISOString()
+                : null
+              : undefined,
+        }),
+      }).catch((err) => console.error("Failed to persist to-do update:", err));
+    },
+    []
+  );
+
+  const toggleTodoComplete = useCallback(
+    (id: string) => {
+      const todo = personalTodos.find((t) => t.id === id);
+      if (!todo) return;
+      updatePersonalTodo(id, { isCompleted: !todo.isCompleted });
+    },
+    [personalTodos, updatePersonalTodo]
+  );
+
+  const deletePersonalTodo = useCallback((id: string) => {
+    setPersonalTodos((prev) => prev.filter((t) => t.id !== id));
+    fetch(`/api/todos/${id}`, { method: "DELETE" }).catch((err) =>
+      console.error("Failed to delete to-do:", err)
+    );
+  }, []);
+
+  // ─── Personal To-Do Reminders: fire a browser + in-app notification once ──
+  // per to-do, `reminderMinutesBefore` minutes ahead of its due time.
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser?.id) return;
+
+    const checkReminders = () => {
+      const now = Date.now();
+      personalTodos.forEach((todo) => {
+        if (todo.isCompleted || !todo.dueAt || todo.reminderSentAt) return;
+        const dueTime = new Date(todo.dueAt).getTime();
+        const reminderTime = dueTime - todo.reminderMinutesBefore * 60000;
+        // Window stays open a few minutes past due time in case the tab
+        // was inactive/closed when the exact reminder moment passed.
+        if (now >= reminderTime && now <= dueTime + 5 * 60000) {
+          const dueLabel = new Date(todo.dueAt as Date).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+
+          if (
+            typeof window !== "undefined" &&
+            "Notification" in window &&
+            Notification.permission === "granted"
+          ) {
+            new Notification(`⏰ ${todo.title}`, {
+              body: `Starts at ${dueLabel}`,
+            });
+          }
+
+          setNotifications((prev) => [
+            {
+              id: `todo-notif-${todo.id}`,
+              userId: currentUser.id,
+              type: "todo_reminder",
+              title: `Reminder: ${todo.title}`,
+              body: `Due at ${dueLabel}`,
+              taskId: null,
+              boardId: null,
+              isRead: false,
+              createdAt: new Date(),
+            },
+            ...prev,
+          ]);
+
+          updatePersonalTodo(todo.id, { reminderSentAt: new Date() });
+        }
+      });
+    };
+
+    checkReminders();
+    const interval = setInterval(checkReminders, 30000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, currentUser?.id, personalTodos, updatePersonalTodo]);
+
   const openTaskModal = useCallback(
-    (taskId: string, tab: "details" | "activity" | "git" = "details") => {
+    (taskId: string, tab: "details" | "activity" = "details") => {
       setActiveTaskId(taskId);
       setSlideOverTab(tab);
     },
@@ -1575,6 +1857,25 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
             });
           }
 
+          // Refresh this user's workspace list — accepting the invite may
+          // have just granted membership to a workspace they didn't have
+          // before, and the workspace switcher won't show it otherwise.
+          fetch(`/api/workspaces?userId=${encodeURIComponent(currentUser.id)}`)
+            .then((r) => r.json())
+            .then((wsRes) => {
+              if (wsRes?.success && Array.isArray(wsRes.workspaces)) {
+                const list: Workspace[] = wsRes.workspaces;
+                setWorkspaces(list);
+                if (list.length > 0) {
+                  const joined = list.find((w) => w.id === updatedBoard.workspaceId);
+                  setWorkspace(joined || wsRes.data || list[0]);
+                }
+              }
+            })
+            .catch((err) =>
+              console.error("Failed to refresh workspaces after accepting invite:", err)
+            );
+
           // Direct sync to localStorage so next render won't revert
           try {
             const saved = localStorage.getItem(STORAGE_KEY);
@@ -1602,7 +1903,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    []
+    [currentUser.id]
   );
 
   const openCreateBoardModal = useCallback(() => setIsCreateBoardOpen(true), []);
@@ -1777,66 +2078,78 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         throw new Error(result?.error || "Failed to create board");
       }
       const createdBoard: Board = result.data;
+      // The server also creates a single placeholder "Active Items" group
+      // as a baseline — it's replaced below by the richer monday.com-style
+      // starter layout (2 groups, 3+2 items), so it gets deleted once the
+      // real ones exist.
+      const serverDefaultGroupId = createdBoard.groupIds[0];
 
       const now = Date.now();
 
-      // Always pin the board to the workspace it was created from. The
-      // server also creates a starter "Active Items" group — replaced
-      // below with a richer client-side starter layout until groups/tasks
-      // move to the database too (next phase).
-      const newBoard: Board = {
-        ...createdBoard,
-        workspaceId: workspace.id,
-        privacy: data.privacy || "main",
-        groupIds: [],
-      };
-
-      // Start like monday.com: two "Group Title" groups holding 3 + 2 starter items
-      const newGroups: Group[] = ["#579bfc", "#a25ddc"].map((color, i) => ({
-        id: `group-${now}-${i}`,
-        boardId: newBoard.id,
-        name: "Group Title",
-        color,
-        order: i,
-        isCollapsed: false,
-        taskIds: [],
-        createdAt: new Date(),
+      // Start like monday.com: two "Group Title" groups holding 3 + 2
+      // starter items — created for real via the API (not faked locally)
+      // so they actually exist in the database and can be assigned, etc.
+      const groupResponses = await Promise.all(
+        ["#579bfc", "#a25ddc"].map((color) =>
+          fetch("/api/groups", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ boardId: createdBoard.id, name: "Group Title", color }),
+          }).then((r) => r.json())
+        )
+      );
+      if (groupResponses.some((r) => !r?.success || !r?.data)) {
+        throw new Error("Failed to create starter groups");
+      }
+      const newGroups: Group[] = groupResponses.map((r) => ({
+        ...r.data,
+        createdAt: new Date(r.data.createdAt),
       }));
 
       const itemLabel = data.itemLabel?.trim() || "Item";
       const starterStatuses: TaskStatus[] = ["in_progress", "done", "todo", "todo", "todo"];
-      const newTasks: Task[] = starterStatuses.map((status, i) => {
-        const group = newGroups[i < 3 ? 0 : 1];
-        const task: Task = {
-          id: `task-${now}-${i}`,
-          itemCode: `WB-${Math.floor(Math.random() * 900) + 100}`,
-          boardId: newBoard.id,
-          groupId: group.id,
-          title: `${itemLabel} ${i + 1}`,
-          description: "",
-          status,
-          priority: "medium",
-          assigneeId: null,
-          reporterId: currentUser.id,
-          dueDate: new Date(now + (i + 2) * 24 * 60 * 60 * 1000),
-          category: "General",
-          timeline: null,
-          votes: 0,
-          tags: [],
-          subtaskIds: [],
-          commentIds: [],
-          attachmentIds: [],
-          activityIds: [],
-          order: group.taskIds.length,
-          isArchived: false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
-        group.taskIds.push(task.id);
-        return task;
+      const taskResponses = await Promise.all(
+        starterStatuses.map((status, i) => {
+          const group = newGroups[i < 3 ? 0 : 1];
+          return fetch("/api/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: `${itemLabel} ${i + 1}`,
+              boardId: createdBoard.id,
+              groupId: group.id,
+              status,
+              priority: "medium",
+              dueDate: new Date(now + (i + 2) * 24 * 60 * 60 * 1000).toISOString(),
+              reporterId: currentUser.id,
+            }),
+          }).then((r) => r.json());
+        })
+      );
+      if (taskResponses.some((r) => !r?.success || !r?.data)) {
+        throw new Error("Failed to create starter items");
+      }
+      const newTasks: Task[] = taskResponses.map((r) => ({
+        ...r.data,
+        dueDate: r.data.dueDate ? new Date(r.data.dueDate) : null,
+        createdAt: new Date(r.data.createdAt),
+        updatedAt: new Date(r.data.updatedAt),
+        timeline: null,
+        votes: 0,
+        tags: [],
+      }));
+
+      newGroups.forEach((g) => {
+        g.taskIds = newTasks.filter((t) => t.groupId === g.id).map((t) => t.id);
       });
 
-      newBoard.groupIds = newGroups.map((g) => g.id);
+      // Always pin the board to the workspace it was created from.
+      const newBoard: Board = {
+        ...createdBoard,
+        workspaceId: workspace.id,
+        privacy: data.privacy || "main",
+        groupIds: newGroups.map((g) => g.id),
+      };
 
       const updatedBoards = [...boards.filter((b) => b.id !== newBoard.id), newBoard];
       const updatedGroups = [...groups.filter((g) => g.boardId !== newBoard.id), ...newGroups];
@@ -1856,6 +2169,10 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         updatedGroups,
         updatedBoards
       );
+
+      if (serverDefaultGroupId) {
+        fetch(`/api/groups/${serverDefaultGroupId}`, { method: "DELETE" }).catch(() => {});
+      }
 
       return newBoard;
     },
@@ -1982,7 +2299,9 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       lastCreatedTaskId,
       clearLastCreatedTaskId,
       deleteTask,
+      deleteTasks,
       moveTaskToGroup,
+      moveTasksToGroup,
       voteItem,
 
       addGroup,
@@ -1998,9 +2317,16 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       inviteMember,
       updateMemberRole,
       removeMember,
+      removeMembers,
 
       markNotificationAsRead,
       markAllNotificationsAsRead,
+
+      personalTodos,
+      createPersonalTodo,
+      updatePersonalTodo,
+      toggleTodoComplete,
+      deletePersonalTodo,
 
       openTaskModal,
       closeTaskModal,
@@ -2103,7 +2429,9 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       lastCreatedTaskId,
       clearLastCreatedTaskId,
       deleteTask,
+      deleteTasks,
       moveTaskToGroup,
+      moveTasksToGroup,
       voteItem,
       addGroup,
       updateGroup,
@@ -2116,8 +2444,14 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       inviteMember,
       updateMemberRole,
       removeMember,
+      removeMembers,
       markNotificationAsRead,
       markAllNotificationsAsRead,
+      personalTodos,
+      createPersonalTodo,
+      updatePersonalTodo,
+      toggleTodoComplete,
+      deletePersonalTodo,
       openTaskModal,
       closeTaskModal,
       openCreateTaskModal,

@@ -28,6 +28,7 @@ model Workspace {
   updatedAt    DateTime @updatedAt
   lastViewedAt DateTime @default(now())
   boards       Board[]
+  posts        Post[]
 }
 
 model User {
@@ -47,6 +48,10 @@ model User {
   activities     Activity[]
   notifications  Notification[]
   ownedBoards    Board[]        @relation("BoardOwner")
+  personalTodos  PersonalTodo[]
+  posts          Post[]
+  postComments   PostComment[]
+  postReactions  PostReaction[]
 }
 
 model Board {
@@ -190,6 +195,67 @@ model Notification {
   boardId   String?
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ─── Workspace Posts (a simple social feed scoped to one workspace) ────────
+
+model Post {
+  id          String         @id @default(cuid())
+  workspaceId String
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content     String
+  imageUrl    String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  comments    PostComment[]
+  reactions   PostReaction[]
+
+  @@index([workspaceId])
+  @@index([authorId])
+}
+
+model PostComment {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content   String
+  imageUrl  String?
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+}
+
+model PostReaction {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+  @@index([postId])
+}
+
+model PersonalTodo {
+  id                     String    @id @default(cuid())
+  userId                 String
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title                  String
+  notes                  String?   @default("")
+  dueAt                  DateTime?
+  reminderMinutesBefore  Int       @default(10)
+  isCompleted            Boolean   @default(false)
+  reminderSentAt         DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   @@index([userId])
 }

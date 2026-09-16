@@ -193,6 +193,19 @@ export function Sidebar({
         <div className="flex-1 py-3 flex flex-col items-center gap-2.5 overflow-y-auto">
           {/* Global Personal Views */}
           <Link
+            href="/"
+            onClick={onItemClick}
+            title="Overview"
+            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+              pathname === "/"
+                ? "bg-[#36384d] text-white shadow-xs"
+                : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+            }`}
+          >
+            <Home className="h-4 w-4 text-indigo-400" />
+          </Link>
+
+          <Link
             href="/calendar"
             onClick={onItemClick}
             title="Calendar"
@@ -308,7 +321,23 @@ export function Sidebar({
         </div>
 
         <div className="space-y-0.5 pt-1">
-          {/* 1. Calendar */}
+          {/* 1. Overview */}
+          <Link
+            href="/"
+            onClick={onItemClick}
+            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              pathname === "/"
+                ? "bg-[#36384d] text-white font-semibold shadow-xs"
+                : "text-zinc-300 hover:bg-[#232533] hover:text-white"
+            }`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <Home className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+              <span className="truncate">Overview</span>
+            </div>
+          </Link>
+
+          {/* 2. Calendar */}
           <Link
             href="/calendar"
             onClick={onItemClick}
@@ -324,7 +353,7 @@ export function Sidebar({
             </div>
           </Link>
 
-          {/* 2. My Work */}
+          {/* 3. My Work */}
           <Link
             href="/my-work"
             onClick={onItemClick}
@@ -345,7 +374,7 @@ export function Sidebar({
             )}
           </Link>
 
-          {/* 3. Inbox */}
+          {/* 4. Inbox */}
           <Link
             href="/inbox"
             onClick={onItemClick}
@@ -722,18 +751,6 @@ export function Sidebar({
               </div>
             ) : (
               <div className="space-y-0.5">
-                <div className="flex items-center justify-between px-1 py-1 text-[11px] font-semibold text-zinc-400">
-                  <span>Projects ({activeWorkspaceBoards.length})</span>
-                  <button
-                    type="button"
-                    onClick={openCreateBoardModal}
-                    title="Add new project"
-                    className="text-zinc-400 hover:text-white p-0.5 rounded transition-colors"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-
                 {activeWorkspaceBoards.map((b) => {
                   const isActive = pathname === `/board/${b.id}`;
                   const taskCount = tasks.filter(
@@ -769,15 +786,6 @@ export function Sidebar({
                     </Link>
                   );
                 })}
-
-                <button
-                  type="button"
-                  onClick={openCreateBoardModal}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 mt-1 rounded-lg text-xs text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800/40 transition-colors"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>+ Add Board / Project</span>
-                </button>
               </div>
             );
           })()}

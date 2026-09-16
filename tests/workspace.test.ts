@@ -13,7 +13,8 @@ describe("Workspace Management API Tests", () => {
   });
 
   it("GET /api/workspaces should return workspaces and active workspace", async () => {
-    const res = await getWorkspacesRoute();
+    const req = new Request("http://localhost:3000/api/workspaces");
+    const res = await getWorkspacesRoute(req);
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);

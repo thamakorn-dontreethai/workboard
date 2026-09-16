@@ -38,7 +38,7 @@ describe("Database & Server Layer Tests", () => {
   it("should initialize default workspace, boards, and users", async () => {
     const ws = await getWorkspace();
     expect(ws).toBeDefined();
-    expect(ws.name).toBe("TGAS Workspace");
+    expect(ws!.name).toBe("TGAS Workspace");
 
     const users = await getUsers();
     expect(users.length).toBeGreaterThan(0);
