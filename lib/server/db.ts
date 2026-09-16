@@ -2115,6 +2115,7 @@ function mapFileRow(row: {
   id: string;
   workspaceId: string;
   name: string;
+  caption: string | null;
   mimeType: string;
   size: number;
   dataUrl: string;
@@ -2125,6 +2126,7 @@ function mapFileRow(row: {
     id: row.id,
     workspaceId: row.workspaceId,
     name: row.name,
+    caption: row.caption || "",
     mimeType: row.mimeType,
     size: row.size,
     dataUrl: row.dataUrl,
@@ -2150,6 +2152,7 @@ export async function getFiles(workspaceId: string): Promise<WorkspaceFile[]> {
 export async function uploadFile(data: {
   workspaceId: string;
   name: string;
+  caption?: string;
   mimeType: string;
   size: number;
   dataUrl: string;
@@ -2167,6 +2170,7 @@ export async function uploadFile(data: {
     data: {
       workspaceId: data.workspaceId,
       name: data.name,
+      caption: data.caption || "",
       mimeType: data.mimeType,
       size: data.size,
       dataUrl: data.dataUrl,
@@ -2174,6 +2178,23 @@ export async function uploadFile(data: {
     },
   });
   return mapFileRow(row);
+}
+
+export async function updateFileCaption(
+  id: string,
+  caption: string
+): Promise<WorkspaceFile | null> {
+  if (!isPrismaEnabled) return null;
+  try {
+    const row = await prisma.fileItem.update({
+      where: { id },
+      data: { caption },
+    });
+    return mapFileRow(row);
+  } catch (e) {
+    console.warn("Prisma updateFileCaption failed:", e);
+    return null;
+  }
 }
 
 export async function deleteFile(id: string): Promise<boolean> {

@@ -33,6 +33,7 @@ export async function POST(request: Request) {
     const file = await uploadFile({
       workspaceId: body.workspaceId,
       name: body.name,
+      caption: body.caption || "",
       mimeType: body.mimeType || "application/octet-stream",
       size: body.size || 0,
       dataUrl: body.dataUrl,

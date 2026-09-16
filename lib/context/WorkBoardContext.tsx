@@ -57,6 +57,7 @@ interface WorkBoardContextType {
 
   // Multi-Workspace & Management
   switchWorkspace: (workspaceId: string) => void;
+  refreshWorkspaces: () => void;
   createWorkspace: (data: {
     name: string;
     description?: string;
@@ -489,6 +490,28 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [isAuthenticated, currentUser?.id]);
+
+  // Re-fetches this user's workspace list on demand — e.g. the workspace
+  // page calls this when the Member tab is opened, so a membership change
+  // (someone accepting an invite from another device/session) shows up
+  // without needing a full page reload. Unlike the initial hydration
+  // above, this keeps whichever workspace is currently active rather than
+  // jumping to the last-viewed one from localStorage.
+  const refreshWorkspaces = useCallback(async () => {
+    if (!currentUser?.id) return;
+    try {
+      const res = await fetch(`/api/workspaces?userId=${encodeURIComponent(currentUser.id)}`);
+      const result = await res.json();
+      if (!result?.success || !Array.isArray(result.workspaces)) return;
+      const list: Workspace[] = result.workspaces;
+      setWorkspaces(list);
+      if (list.length > 0) {
+        setWorkspace((prev) => list.find((w) => w.id === prev.id) || result.data || list[0]);
+      }
+    } catch (err) {
+      console.error("Failed to refresh workspaces:", err);
+    }
+  }, [currentUser?.id]);
 
   // ─── Server & LocalStorage Hydration ──────────────────────────────────────
   useEffect(() => {
@@ -2412,6 +2435,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
       // Multi-Workspace
       switchWorkspace,
+      refreshWorkspaces,
       createWorkspace,
       updateWorkspace,
       deleteWorkspace,
@@ -2534,6 +2558,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       notifications,
       unreadNotificationCount,
       switchWorkspace,
+      refreshWorkspaces,
       createWorkspace,
       updateWorkspace,
       deleteWorkspace,

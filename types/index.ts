@@ -285,6 +285,7 @@ export interface WorkspaceFile {
   id: ID;
   workspaceId: ID;
   name: string;
+  caption?: string;
   mimeType: string;
   size: number;
   dataUrl: string;

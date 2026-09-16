@@ -107,6 +107,7 @@ model FileItem {
   workspaceId  String
   workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   name         String
+  caption      String?  @default("")
   mimeType     String
   size         Int
   dataUrl      String   @db.Text

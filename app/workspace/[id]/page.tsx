@@ -68,6 +68,7 @@ export default function WorkspacePage() {
     openCreateBoardModal,
     openInviteMemberModal,
     removeMembers,
+    refreshWorkspaces,
   } = useWorkBoard();
 
   // Find target workspace
@@ -290,10 +291,23 @@ export default function WorkspacePage() {
     };
   }, [currentWs?.id, activeTab]);
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Membership can change from another device/session (someone accepting
+  // an invite elsewhere) — refetch it whenever the Member tab is opened so
+  // it doesn't sit on a stale list from whenever this tab last loaded.
+  useEffect(() => {
+    if (activeTab === "permissions") refreshWorkspaces();
+  }, [activeTab, refreshWorkspaces]);
+
+  // Picking a file doesn't upload it right away — it's held as "pending"
+  // so the user can add an optional caption/note before it actually goes
+  // up, instead of uploading blind and editing after the fact.
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingCaption, setPendingCaption] = useState("");
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file || !currentWs?.id) return;
+    if (!file) return;
 
     setFileUploadError(null);
     if (file.size > MAX_FILE_BYTES) {
@@ -302,18 +316,29 @@ export default function WorkspacePage() {
       );
       return;
     }
+    setPendingFile(file);
+    setPendingCaption("");
+  };
 
+  const handleCancelPendingUpload = () => {
+    setPendingFile(null);
+    setPendingCaption("");
+  };
+
+  const handleConfirmUpload = async () => {
+    if (!pendingFile || !currentWs?.id) return;
     setIsUploadingFile(true);
     try {
-      const dataUrl = await readImageAsDataUrl(file);
+      const dataUrl = await readImageAsDataUrl(pendingFile);
       const res = await fetch("/api/files", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           workspaceId: currentWs.id,
-          name: file.name,
-          mimeType: file.type || "application/octet-stream",
-          size: file.size,
+          name: pendingFile.name,
+          caption: pendingCaption.trim(),
+          mimeType: pendingFile.type || "application/octet-stream",
+          size: pendingFile.size,
           dataUrl,
           uploadedById: currentUser.id,
         }),
@@ -325,6 +350,8 @@ export default function WorkspacePage() {
         createdAt: new Date(result.data.createdAt),
       };
       setFiles((prev) => [uploaded, ...prev]);
+      setPendingFile(null);
+      setPendingCaption("");
     } catch (err: any) {
       setFileUploadError(err.message || "Failed to upload file.");
     } finally {
@@ -342,6 +369,26 @@ export default function WorkspacePage() {
     } catch (err) {
       console.error("Failed to delete file:", err);
     }
+  };
+
+  // Inline caption editing on an already-uploaded file.
+  const [editingCaptionFileId, setEditingCaptionFileId] = useState<string | null>(null);
+  const [captionInput, setCaptionInput] = useState("");
+
+  const handleEditCaptionStart = (f: WorkspaceFile) => {
+    setEditingCaptionFileId(f.id);
+    setCaptionInput(f.caption || "");
+  };
+
+  const handleEditCaptionSave = (fileId: string) => {
+    const trimmed = captionInput.trim();
+    setEditingCaptionFileId(null);
+    setFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, caption: trimmed } : f)));
+    fetch(`/api/files/${fileId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caption: trimmed }),
+    }).catch((err) => console.error("Failed to save caption:", err));
   };
 
   const getFileIcon = (mimeType: string, name: string) => {
@@ -1141,6 +1188,52 @@ export default function WorkspacePage() {
                 </div>
               )}
 
+              {pendingFile && (
+                <div className="p-3 rounded-xl border border-[#0073ea]/40 bg-[#0073ea]/5 space-y-2.5">
+                  <div className="flex items-center gap-2.5">
+                    {(() => {
+                      const Icon = getFileIcon(pendingFile.type, pendingFile.name);
+                      return <Icon className="h-4 w-4 text-zinc-400 shrink-0" />;
+                    })()}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-white truncate">{pendingFile.name}</p>
+                      <p className="text-[10px] text-zinc-500">{formatFileSize(pendingFile.size)}</p>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={pendingCaption}
+                    onChange={(e) => setPendingCaption(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleConfirmUpload();
+                      if (e.key === "Escape") handleCancelPendingUpload();
+                    }}
+                    placeholder="Add a caption or note (optional)..."
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900/90 px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#0073ea]"
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCancelPendingUpload}
+                      disabled={isUploadingFile}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-white transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmUpload}
+                      disabled={isUploadingFile}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0073ea] hover:bg-[#0060c0] disabled:opacity-50 text-white text-xs font-semibold transition-colors"
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      <span>{isUploadingFile ? "Uploading..." : "Upload"}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {isLoadingFiles ? (
                 <div className="py-16 text-center text-xs text-zinc-500">Loading files...</div>
               ) : filteredFiles.length === 0 ? (
@@ -1167,12 +1260,42 @@ export default function WorkspacePage() {
                       >
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                           <Icon className="h-4 w-4 text-zinc-400 shrink-0" />
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="text-xs font-medium text-white truncate">{f.name}</p>
                             <p className="text-[10px] text-zinc-500">
                               {formatFileSize(f.size)} · {uploader?.name || "Unknown"} ·{" "}
                               {formatDate(f.createdAt)}
                             </p>
+                            {editingCaptionFileId === f.id ? (
+                              <input
+                                type="text"
+                                autoFocus
+                                value={captionInput}
+                                onChange={(e) => setCaptionInput(e.target.value)}
+                                onBlur={() => handleEditCaptionSave(f.id)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleEditCaptionSave(f.id);
+                                  if (e.key === "Escape") setEditingCaptionFileId(null);
+                                }}
+                                placeholder="Add a caption or note..."
+                                className="mt-1 w-full rounded border-b border-[#0073ea] bg-transparent text-[11px] text-zinc-200 placeholder:text-zinc-500 focus:outline-none"
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleEditCaptionStart(f)}
+                                className="mt-0.5 flex items-center gap-1 text-[11px] text-left transition-colors group/caption"
+                              >
+                                {f.caption ? (
+                                  <span className="text-zinc-400 truncate">{f.caption}</span>
+                                ) : (
+                                  <span className="text-zinc-600 italic opacity-0 group-hover:opacity-100 transition-opacity">
+                                    + Add a caption
+                                  </span>
+                                )}
+                                <Pencil className="h-2.5 w-2.5 text-zinc-600 opacity-0 group-hover:opacity-100 shrink-0 transition-opacity" />
+                              </button>
+                            )}
                           </div>
                         </div>
 
