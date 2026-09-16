@@ -79,7 +79,7 @@ export default function BoardPage() {
       groupId: targetGroupId,
       status: "todo",
       priority: "medium",
-    });
+    }).catch((err) => console.error("Failed to create item:", err));
   };
 
   return (
@@ -245,7 +245,9 @@ export default function BoardPage() {
               type="button"
               onClick={() => {
                 setIsNewItemMenuOpen(false);
-                addGroup(board.id, "New Group");
+                addGroup(board.id, "New Group").catch((err) =>
+                  console.error("Failed to create group:", err)
+                );
               }}
               className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
             >
@@ -343,7 +345,11 @@ export default function BoardPage() {
         {/* Add new group button */}
         <button
           type="button"
-          onClick={() => addGroup(board.id, "New Group")}
+          onClick={() =>
+            addGroup(board.id, "New Group").catch((err) =>
+              console.error("Failed to create group:", err)
+            )
+          }
           className="mt-6 flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-300 hover:text-white hover:bg-zinc-800/50 transition-colors cursor-pointer"
         >
           <Plus className="h-4 w-4" />

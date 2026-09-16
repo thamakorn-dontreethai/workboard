@@ -33,6 +33,8 @@ export async function POST(req: NextRequest) {
       description: body.description?.trim(),
       privacy: body.privacy || "open",
       avatarColor: body.avatarColor || "bg-indigo-600",
+      icon: body.icon,
+      coverColor: body.coverColor,
       creatorId: body.creatorId,
     });
 

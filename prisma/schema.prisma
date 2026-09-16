@@ -9,13 +9,25 @@ datasource db {
 }
 
 model Workspace {
-  id        String   @id @default(cuid())
-  name      String
-  logo      String?
-  plan      String   @default("enterprise")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  boards    Board[]
+  id           String   @id @default(cuid())
+  name         String
+  description  String?  @default("")
+  logo         String?
+  icon         String?
+  plan         String   @default("enterprise")
+  privacy      String   @default("open")
+  avatarColor  String   @default("bg-indigo-600")
+  coverColor   String?
+  isPinned     Boolean  @default(false)
+  // Membership (userId/role/joinedAt per member) as JSON rather than a
+  // join table — keeps this phase's migration additive and low-risk; can
+  // be normalized into a real WorkspaceMember model later if per-member
+  // querying is ever needed.
+  members      Json     @default("[]")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastViewedAt DateTime @default(now())
+  boards       Board[]
 }
 
 model User {
@@ -45,6 +57,7 @@ model Board {
   description  String?    @default("")
   type         String     @default("general")
   color        String     @default("bg-blue-500")
+  privacy      String     @default("main")
   ownerId      String
   owner        User       @relation("BoardOwner", fields: [ownerId], references: [id])
   memberIds    String[]   @default([])

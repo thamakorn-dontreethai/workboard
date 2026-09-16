@@ -127,7 +127,7 @@ interface WorkBoardContextType {
     category?: string;
     timeline?: { start: string; end: string } | null;
     tags?: string[];
-  }) => Task;
+  }) => Promise<Task>;
   lastCreatedTaskId: string | null;
   clearLastCreatedTaskId: () => void;
   deleteTask: (taskId: string) => void;
@@ -135,7 +135,7 @@ interface WorkBoardContextType {
   voteItem: (taskId: string) => void;
 
   // Actions - Groups
-  addGroup: (boardId: string, name: string, color?: string) => void;
+  addGroup: (boardId: string, name: string, color?: string) => Promise<void>;
   updateGroup: (groupId: string, updates: Partial<Pick<Group, "name" | "color">>) => void;
   reorderGroups: (boardId: string, orderedGroupIds: string[]) => void;
   deleteGroup: (groupId: string) => void;
@@ -143,8 +143,8 @@ interface WorkBoardContextType {
 
   // Actions - Subtasks & Comments
   toggleSubtask: (subtaskId: string) => void;
-  addSubtask: (taskId: string, title: string) => void;
-  addComment: (taskId: string, content: string) => void;
+  addSubtask: (taskId: string, title: string) => Promise<void>;
+  addComment: (taskId: string, content: string) => Promise<void>;
 
   // Actions - Members & Workspace
   inviteMember: (member: {
@@ -227,6 +227,10 @@ const WorkBoardContext = createContext<WorkBoardContextType | undefined>(
 );
 
 const STORAGE_KEY = "workboard_state_v5";
+// Not the source of truth for workspace data (the database is) — just a
+// per-browser convenience remembering which workspace tab was last open,
+// so a refresh doesn't always dump you back on the first one.
+const ACTIVE_WORKSPACE_KEY = "workboard_active_workspace_id";
 
 const DUMMY_USER_IDS = ["user-1", "user-2", "user-3", "user-4", "user-5", "user-6"];
 const DUMMY_USER_NAMES = ["Alex Morgan", "Sarah Chen", "Marcus Vance", "Elena Rostova", "David Kim", "Priya Patel"];
@@ -281,11 +285,139 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   ]);
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  // True once the localStorage-restore effect below has run at least once.
-  // AppShell must wait for this before deciding to redirect to /login —
-  // otherwise it sees the default isAuthenticated=false on first mount
-  // and bounces an already-logged-in user out before the session is restored.
-  const [isHydrated, setIsHydrated] = useState<boolean>(false);
+  // True once BOTH the localStorage-restore effect and the database fetch
+  // below have run at least once. AppShell must wait for this before
+  // deciding to redirect to /login — otherwise it sees the default
+  // isAuthenticated=false on first mount and bounces an already-logged-in
+  // user out before the session is restored.
+  const [isLocalHydrated, setIsLocalHydrated] = useState<boolean>(false);
+  const [isServerHydrated, setIsServerHydrated] = useState<boolean>(false);
+  const isHydrated = isLocalHydrated && isServerHydrated;
+
+  // ─── Workspaces, boards, groups, tasks, comments, subtasks, activities:
+  // hydrate from the database ─────────────────────────────────────────────
+  // None of these are read from localStorage anymore — the database is the
+  // source of truth, so a refresh (or a different browser/device) shows
+  // the real current state instead of whatever this one browser cached.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateFromServer() {
+      try {
+        let activeWorkspaceIdHint: string | null = null;
+        try {
+          activeWorkspaceIdHint = localStorage.getItem(ACTIVE_WORKSPACE_KEY);
+        } catch {
+          // ignore — localStorage unavailable
+        }
+
+        const [wsRes, boardsRes, groupsRes, tasksRes, commentsRes, subtasksRes, activitiesRes] =
+          await Promise.all([
+            fetch("/api/workspaces").then((r) => r.json()).catch(() => null),
+            fetch("/api/boards").then((r) => r.json()).catch(() => null),
+            fetch("/api/groups").then((r) => r.json()).catch(() => null),
+            fetch("/api/tasks").then((r) => r.json()).catch(() => null),
+            fetch("/api/comments").then((r) => r.json()).catch(() => null),
+            fetch("/api/subtasks").then((r) => r.json()).catch(() => null),
+            fetch("/api/activities").then((r) => r.json()).catch(() => null),
+          ]);
+
+        if (cancelled) return;
+
+        if (wsRes?.success && Array.isArray(wsRes.workspaces) && wsRes.workspaces.length > 0) {
+          const list: Workspace[] = wsRes.workspaces;
+          setWorkspaces(list);
+          const preferred = activeWorkspaceIdHint
+            ? list.find((w) => w.id === activeWorkspaceIdHint)
+            : undefined;
+          setWorkspace(preferred || wsRes.data || list[0]);
+        }
+
+        if (boardsRes?.success && Array.isArray(boardsRes.data)) {
+          setBoards(boardsRes.data);
+        }
+
+        if (groupsRes?.success && Array.isArray(groupsRes.data)) {
+          setGroups(groupsRes.data);
+        }
+
+        if (tasksRes?.success && Array.isArray(tasksRes.data)) {
+          setTasks(
+            tasksRes.data.map((t: Task) => ({
+              ...t,
+              dueDate: t.dueDate ? new Date(t.dueDate) : null,
+              createdAt: new Date(t.createdAt),
+              updatedAt: new Date(t.updatedAt),
+            }))
+          );
+        }
+
+        if (commentsRes?.success && Array.isArray(commentsRes.data)) {
+          setComments(
+            commentsRes.data.map((c: Comment) => ({
+              ...c,
+              createdAt: new Date(c.createdAt),
+              updatedAt: new Date(c.updatedAt),
+            }))
+          );
+        }
+
+        if (subtasksRes?.success && Array.isArray(subtasksRes.data)) {
+          setSubtasks(
+            subtasksRes.data.map((s: Subtask) => ({
+              ...s,
+              dueDate: s.dueDate ? new Date(s.dueDate) : null,
+              createdAt: new Date(s.createdAt),
+              updatedAt: new Date(s.updatedAt),
+            }))
+          );
+        }
+
+        if (activitiesRes?.success && Array.isArray(activitiesRes.data)) {
+          setActivities(
+            activitiesRes.data.map((a: Activity) => ({
+              ...a,
+              createdAt: new Date(a.createdAt),
+            }))
+          );
+        }
+      } catch (err) {
+        console.error("Failed to hydrate board data from the database:", err);
+      } finally {
+        if (!cancelled) setIsServerHydrated(true);
+      }
+    }
+
+    hydrateFromServer();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ─── Notifications: hydrate per-user once the signed-in user is known ────
+  // Runs again whenever the user changes (login/switch), not just once on
+  // mount — unlike workspaces/boards/tasks, this data IS user-specific.
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser?.id) return;
+    let cancelled = false;
+
+    fetch(`/api/notifications?userId=${encodeURIComponent(currentUser.id)}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (cancelled || !res?.success || !Array.isArray(res.data)) return;
+        setNotifications(
+          res.data.map((n: Notification) => ({
+            ...n,
+            createdAt: new Date(n.createdAt),
+          }))
+        );
+      })
+      .catch((err) => console.error("Failed to hydrate notifications:", err));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, currentUser?.id]);
 
   // ─── Server & LocalStorage Hydration ──────────────────────────────────────
   useEffect(() => {
@@ -313,59 +445,37 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
             if (cleanUsers.length > 0) setUsers(cleanUsers);
           }
         }
-        // Restore workspace data
-        if (parsed.workspaces && parsed.workspaces.length > 0) {
-          setWorkspaces(parsed.workspaces);
-        }
-        if (parsed.workspace) setWorkspace(parsed.workspace);
-        if (parsed.boards) setBoards(parsed.boards);
-        if (parsed.groups) setGroups(parsed.groups);
-        if (parsed.tasks) {
-          setTasks(
-            parsed.tasks.map((t: Task) => ({
-              ...t,
-              dueDate: t.dueDate ? new Date(t.dueDate) : null,
-              createdAt: new Date(t.createdAt),
-              updatedAt: new Date(t.updatedAt),
-            }))
-          );
-        }
-        if (parsed.activities) {
-          setActivities(
-            parsed.activities.map((a: Activity) => ({
-              ...a,
-              createdAt: new Date(a.createdAt),
-            }))
-          );
-        }
-        if (parsed.notifications) {
-          setNotifications(
-            parsed.notifications.map((n: Notification) => ({
-              ...n,
-              createdAt: new Date(n.createdAt),
-            }))
-          );
-        }
+        // Workspaces, boards, groups, tasks, comments, subtasks,
+        // activities and notifications now all come from the database
+        // (see the hydrateFromServer / notifications effects above) — not
+        // restored from here.
       }
     } catch {
       // ignore parse errors
     } finally {
-      setIsHydrated(true);
+      setIsLocalHydrated(true);
     }
   }, []);
 
   const persistState = useCallback(
+    // Everything except auth (isAuthenticated/currentUserId/users) is
+    // accepted here only so every one of this function's many call sites
+    // keeps working unchanged — none of it is written to localStorage
+    // anymore. The database is the source of truth for workspaces, boards,
+    // groups, tasks, comments, subtasks, activities and notifications now
+    // (see the hydrateFromServer / notifications effects above); writing
+    // them here too would just be stale data nothing ever reads back.
     (
       newUsers: User[],
-      newWorkspace: Workspace,
-      newTasks: Task[],
-      newActivities: Activity[],
-      newNotifications: Notification[],
+      _newWorkspace: Workspace,
+      _newTasks: Task[],
+      _newActivities: Activity[],
+      _newNotifications: Notification[],
       currUser: User,
-      newGroups?: Group[],
-      newBoards?: Board[],
+      _newGroups?: Group[],
+      _newBoards?: Board[],
       authenticated?: boolean,
-      newWorkspaces?: Workspace[]
+      _newWorkspaces?: Workspace[]
     ) => {
       try {
         localStorage.setItem(
@@ -374,20 +484,13 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
             isAuthenticated: authenticated ?? true,
             currentUserId: currUser.id,
             users: newUsers,
-            workspace: newWorkspace,
-            workspaces: newWorkspaces || workspaces,
-            tasks: newTasks,
-            activities: newActivities,
-            notifications: newNotifications,
-            groups: newGroups || groups,
-            boards: newBoards || boards,
           })
         );
       } catch {
         // ignore
       }
     },
-    [groups, boards, workspaces]
+    []
   );
 
   const login = useCallback(
@@ -590,6 +693,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         updatedNotifications,
         currentUser
       );
+
+      fetch(`/api/tasks/${taskId}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assigneeId: newAssigneeId, actorId: currentUser.id }),
+      }).catch((err) => console.error("Failed to persist assignee:", err));
     },
     [
       tasks,
@@ -689,6 +798,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         notifications,
         currentUser
       );
+
+      fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, groupId: newGroupId, actorId: currentUser.id }),
+      }).catch((err) => console.error("Failed to persist status:", err));
     },
     [tasks, groups, currentUser, activities, users, workspace, notifications, persistState, resolveTargetGroupId]
   );
@@ -723,6 +838,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         notifications,
         currentUser
       );
+
+      fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priority, actorId: currentUser.id }),
+      }).catch((err) => console.error("Failed to persist priority:", err));
     },
     [tasks, currentUser, activities, users, workspace, notifications, persistState]
   );
@@ -755,6 +876,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         notifications,
         currentUser
       );
+
+      fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dueDate, groupId: newGroupId, actorId: currentUser.id }),
+      }).catch((err) => console.error("Failed to persist due date:", err));
     },
     [tasks, groups, users, workspace, activities, notifications, currentUser, persistState, resolveTargetGroupId]
   );
@@ -773,6 +900,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         notifications,
         currentUser
       );
+
+      fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value }),
+      }).catch((err) => console.error(`Failed to persist ${String(field)}:`, err));
     },
     [tasks, users, workspace, activities, notifications, currentUser, persistState]
   );
@@ -791,6 +924,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         notifications,
         currentUser
       );
+
+      fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      }).catch((err) => console.error("Failed to persist task details:", err));
     },
     [tasks, users, workspace, activities, notifications, currentUser, persistState]
   );
@@ -804,7 +943,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const createTask = useCallback(
-    (newTaskData: {
+    async (newTaskData: {
       title: string;
       description?: string;
       boardId: string;
@@ -816,44 +955,42 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       category?: string;
       timeline?: { start: string; end: string } | null;
       tags?: string[];
-    }) => {
-      const prefix =
-        newTaskData.boardId === "board-requests"
-          ? "REQ"
-          : newTaskData.boardId === "board-marketing"
-          ? "MKT"
-          : newTaskData.boardId === "board-roadmap"
-          ? "OKR"
-          : "WB";
+    }): Promise<Task> => {
+      const status =
+        newTaskData.status ||
+        (newTaskData.boardId === "board-requests" ? "new_request" : "todo");
 
-      const num = Math.floor(Math.random() * 900) + 100;
-
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newTaskData.title.trim(),
+          description: newTaskData.description || "",
+          boardId: newTaskData.boardId,
+          groupId: newTaskData.groupId,
+          assigneeId: newTaskData.assigneeId || null,
+          priority: newTaskData.priority || "medium",
+          status,
+          dueDate: newTaskData.dueDate || null,
+          category: newTaskData.category || "General",
+          reporterId: currentUser.id,
+        }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) {
+        throw new Error(result?.error || "Failed to create task");
+      }
+      // The server doesn't persist timeline/tags/votes (no columns for them
+      // yet) — keep them client-side on top of the server's real record so
+      // the UI doesn't regress while that's still a gap.
       const newTask: Task = {
-        id: `task-${Date.now()}`,
-        itemCode: `${prefix}-${num}`,
-        boardId: newTaskData.boardId,
-        groupId: newTaskData.groupId,
-        title: newTaskData.title.trim(),
-        description: newTaskData.description || "",
-        status:
-          newTaskData.status ||
-          (newTaskData.boardId === "board-requests" ? "new_request" : "todo"),
-        priority: newTaskData.priority || "medium",
-        assigneeId: newTaskData.assigneeId || null,
-        reporterId: currentUser.id,
-        dueDate: newTaskData.dueDate || null,
-        category: newTaskData.category || "General",
+        ...result.data,
+        dueDate: result.data.dueDate ? new Date(result.data.dueDate) : null,
+        createdAt: new Date(result.data.createdAt),
+        updatedAt: new Date(result.data.updatedAt),
         timeline: newTaskData.timeline || null,
         votes: 0,
         tags: newTaskData.tags || [],
-        subtaskIds: [],
-        commentIds: [],
-        attachmentIds: [],
-        activityIds: [],
-        order: tasks.filter((t) => t.groupId === newTaskData.groupId).length,
-        isArchived: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
       };
 
       const updatedTasks = [newTask, ...tasks];
@@ -911,6 +1048,10 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         notifications,
         currentUser
       );
+
+      fetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch((err) =>
+        console.error("Failed to delete task:", err)
+      );
     },
     [tasks, activeTaskId, users, workspace, activities, notifications, currentUser, persistState]
   );
@@ -935,13 +1076,19 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         notifications,
         currentUser
       );
+
+      fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groupId: newGroupId, order: newOrder, actorId: currentUser.id }),
+      }).catch((err) => console.error("Failed to persist group move:", err));
     },
     [tasks, users, workspace, activities, notifications, currentUser, persistState]
   );
 
   // Group Management
   const addGroup = useCallback(
-    (boardId: string, name: string, color?: string) => {
+    async (boardId: string, name: string, color?: string) => {
       const siblingGroups = groups.filter((g) => g.boardId === boardId);
       // Pick a color that isn't already used by a sibling group on this
       // board, so newly-created groups don't all end up the same shade.
@@ -952,16 +1099,20 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         GROUP_COLOR_PALETTE.find((c) => !usedColors.has(c)) ||
         GROUP_COLOR_PALETTE[siblingGroups.length % GROUP_COLOR_PALETTE.length];
 
+      const res = await fetch("/api/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ boardId, name: name.trim() || "New Group", color: nextColor }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) {
+        throw new Error(result?.error || "Failed to create group");
+      }
       const newGroup: Group = {
-        id: `group-${Date.now()}`,
-        boardId,
-        name: name.trim() || "New Group",
-        color: nextColor,
-        order: siblingGroups.length,
-        isCollapsed: false,
-        taskIds: [],
-        createdAt: new Date(),
+        ...result.data,
+        createdAt: new Date(result.data.createdAt),
       };
+
       const updatedGroups = [...groups, newGroup];
       setGroups(updatedGroups);
       persistState(
@@ -1000,6 +1151,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         currentUser,
         updatedGroups
       );
+
+      fetch(`/api/groups/${groupId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      }).catch((err) => console.error("Failed to persist group update:", err));
     },
     [groups, users, workspace, tasks, activities, notifications, currentUser, persistState]
   );
@@ -1022,6 +1179,14 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         currentUser,
         updatedGroups
       );
+
+      orderedGroupIds.forEach((id, index) => {
+        fetch(`/api/groups/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order: index }),
+        }).catch((err) => console.error("Failed to persist group order:", err));
+      });
     },
     [groups, users, workspace, tasks, activities, notifications, currentUser, persistState]
   );
@@ -1041,40 +1206,71 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         currentUser,
         updatedGroups
       );
+
+      fetch(`/api/groups/${groupId}`, { method: "DELETE" }).catch((err) =>
+        console.error("Failed to delete group:", err)
+      );
     },
     [groups, tasks, users, workspace, activities, notifications, currentUser, persistState]
   );
 
-  const toggleGroupCollapse = useCallback((groupId: string) => {
-    setGroups((prev) =>
-      prev.map((g) =>
-        g.id === groupId ? { ...g, isCollapsed: !g.isCollapsed } : g
-      )
-    );
-  }, []);
+  const toggleGroupCollapse = useCallback(
+    (groupId: string) => {
+      const target = groups.find((g) => g.id === groupId);
+      if (!target) return;
+      const isCollapsed = !target.isCollapsed;
 
-  const toggleSubtask = useCallback((subtaskId: string) => {
-    setSubtasks((prev) =>
-      prev.map((s) =>
-        s.id === subtaskId
-          ? { ...s, isCompleted: !s.isCompleted, updatedAt: new Date() }
-          : s
-      )
-    );
-  }, []);
+      setGroups((prev) =>
+        prev.map((g) => (g.id === groupId ? { ...g, isCollapsed } : g))
+      );
+
+      fetch(`/api/groups/${groupId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isCollapsed }),
+      }).catch((err) => console.error("Failed to persist group collapse:", err));
+    },
+    [groups]
+  );
+
+  const toggleSubtask = useCallback(
+    (subtaskId: string) => {
+      setSubtasks((prev) =>
+        prev.map((s) =>
+          s.id === subtaskId
+            ? { ...s, isCompleted: !s.isCompleted, updatedAt: new Date() }
+            : s
+        )
+      );
+
+      const taskId = subtasks.find((s) => s.id === subtaskId)?.taskId;
+      fetch(`/api/tasks/${taskId || "unknown"}/subtasks`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subtaskId }),
+      }).catch((err) => console.error("Failed to persist subtask toggle:", err));
+    },
+    [subtasks]
+  );
 
   const addSubtask = useCallback(
-    (taskId: string, title: string) => {
+    async (taskId: string, title: string) => {
       if (!title.trim()) return;
+
+      const res = await fetch(`/api/tasks/${taskId}/subtasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim() }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) {
+        throw new Error(result?.error || "Failed to create subtask");
+      }
       const newSub: Subtask = {
-        id: `sub-${Date.now()}`,
-        taskId,
-        title: title.trim(),
-        isCompleted: false,
-        assigneeId: null,
-        dueDate: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        ...result.data,
+        dueDate: result.data.dueDate ? new Date(result.data.dueDate) : null,
+        createdAt: new Date(result.data.createdAt),
+        updatedAt: new Date(result.data.updatedAt),
       };
       setSubtasks((prev) => [...prev, newSub]);
     },
@@ -1082,16 +1278,22 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addComment = useCallback(
-    (taskId: string, content: string) => {
+    async (taskId: string, content: string) => {
       if (!content.trim()) return;
+
+      const res = await fetch(`/api/tasks/${taskId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: content.trim(), authorId: currentUser.id }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) {
+        throw new Error(result?.error || "Failed to add comment");
+      }
       const newComment: Comment = {
-        id: `comment-${Date.now()}`,
-        taskId,
-        authorId: currentUser.id,
-        content: content.trim(),
-        isEdited: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        ...result.data,
+        createdAt: new Date(result.data.createdAt),
+        updatedAt: new Date(result.data.updatedAt),
       };
       setComments((prev) => [...prev, newComment]);
 
@@ -1248,11 +1450,21 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
     );
+
+    fetch(`/api/notifications/${id}`, { method: "PATCH" }).catch((err) =>
+      console.error("Failed to persist notification read state:", err)
+    );
   }, []);
 
   const markAllNotificationsAsRead = useCallback(() => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-  }, []);
+
+    fetch("/api/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: currentUser.id }),
+    }).catch((err) => console.error("Failed to persist notifications read state:", err));
+  }, [currentUser.id]);
 
   const openTaskModal = useCallback(
     (taskId: string, tab: "details" | "activity" | "git" = "details") => {
@@ -1413,27 +1625,25 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     (workspaceId: string) => {
       const target = workspaces.find((w) => w.id === workspaceId);
       if (target) {
-        const updatedTarget: Workspace = { ...target, lastViewedAt: new Date() };
-        const updatedList = workspaces.map((w) =>
-          w.id === workspaceId ? updatedTarget : w
-        );
-        setWorkspace(updatedTarget);
-        setWorkspaces(updatedList);
-        persistState(
-          users,
-          updatedTarget,
-          tasks,
-          activities,
-          notifications,
-          currentUser,
-          groups,
-          boards,
-          isAuthenticated,
-          updatedList
-        );
+        setWorkspace(target);
+        try {
+          localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspaceId);
+        } catch {
+          // ignore — localStorage unavailable
+        }
+        // Best-effort: record the view server-side too, so lastViewedAt is
+        // meaningful if it's ever surfaced (e.g. "recently viewed"). Not
+        // awaited — switching tabs shouldn't wait on a network round trip.
+        fetch(`/api/workspaces/${workspaceId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lastViewedAt: new Date() }),
+        }).catch(() => {
+          // non-critical — ignore
+        });
       }
     },
-    [workspaces, users, tasks, activities, notifications, currentUser, groups, boards, isAuthenticated, persistState]
+    [workspaces]
   );
 
   const createWorkspace = useCallback(
@@ -1442,168 +1652,93 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       description?: string;
       privacy?: "open" | "closed";
       avatarColor?: string;
+      icon?: string;
+      coverColor?: string;
     }): Promise<Workspace> => {
-      let createdWs: Workspace | null = null;
-      try {
-        const res = await fetch("/api/workspaces", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...data,
-            creatorId: currentUser.id,
-          }),
-        });
-        const result = await res.json();
-        if (result?.success && result?.data) {
-          createdWs = result.data;
-        }
-      } catch (err) {
-        console.error("Failed to create workspace on server:", err);
+      const res = await fetch("/api/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...data, creatorId: currentUser.id }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) {
+        throw new Error(result?.error || "Failed to create workspace");
       }
+      const newWs: Workspace = result.data;
 
-      const newWs: Workspace = createdWs || {
-        id: `ws-${Date.now()}`,
-        name: data.name,
-        description: data.description || "",
-        plan: "Pro",
-        privacy: data.privacy || "open",
-        avatarColor: data.avatarColor || "bg-indigo-600",
-        isPinned: false,
-        members: [
-          {
-            userId: currentUser.id,
-            workspaceId: `ws-${Date.now()}`,
-            role: "owner",
-            joinedAt: new Date(),
-          },
-        ],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        lastViewedAt: new Date(),
-      };
-
-      const updatedList = [...workspaces, newWs];
-      setWorkspaces(updatedList);
+      setWorkspaces((prev) => [...prev, newWs]);
       setWorkspace(newWs);
-
-      persistState(
-        users,
-        newWs,
-        tasks,
-        activities,
-        notifications,
-        currentUser,
-        groups,
-        boards,
-        isAuthenticated,
-        updatedList
-      );
-
+      try {
+        localStorage.setItem(ACTIVE_WORKSPACE_KEY, newWs.id);
+      } catch {
+        // ignore — localStorage unavailable
+      }
       return newWs;
     },
-    [currentUser, workspaces, users, tasks, activities, notifications, groups, boards, isAuthenticated, persistState]
+    [currentUser]
   );
 
   const updateWorkspace = useCallback(
     async (workspaceId: string, updates: Partial<Workspace>): Promise<Workspace> => {
-      try {
-        await fetch(`/api/workspaces/${workspaceId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updates),
-        });
-      } catch (err) {
-        console.error("Failed to update workspace on server:", err);
+      const res = await fetch(`/api/workspaces/${workspaceId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) {
+        throw new Error(result?.error || "Failed to update workspace");
       }
+      const updated: Workspace = result.data;
 
-      const updatedList = workspaces.map((w) =>
-        w.id === workspaceId ? { ...w, ...updates, updatedAt: new Date() } : w
-      );
-      setWorkspaces(updatedList);
-      const updatedCurrent = updatedList.find((w) => w.id === workspace.id) || updatedList[0];
-      setWorkspace(updatedCurrent);
-
-      persistState(
-        users,
-        updatedCurrent,
-        tasks,
-        activities,
-        notifications,
-        currentUser,
-        groups,
-        boards,
-        isAuthenticated,
-        updatedList
-      );
-      return updatedCurrent;
+      setWorkspaces((prev) => prev.map((w) => (w.id === workspaceId ? updated : w)));
+      setWorkspace((prev) => (prev.id === workspaceId ? updated : prev));
+      return updated;
     },
-    [workspaces, workspace.id, users, tasks, activities, notifications, currentUser, groups, boards, isAuthenticated, persistState]
+    []
   );
 
   const deleteWorkspace = useCallback(
     async (workspaceId: string): Promise<boolean> => {
       if (workspaces.length <= 1) return false;
-      try {
-        await fetch(`/api/workspaces/${workspaceId}`, { method: "DELETE" });
-      } catch (err) {
-        console.error("Failed to delete workspace on server:", err);
+
+      const res = await fetch(`/api/workspaces/${workspaceId}`, { method: "DELETE" });
+      const result = await res.json();
+      if (!result?.success) {
+        throw new Error(result?.error || "Failed to delete workspace");
       }
 
       const updatedList = workspaces.filter((w) => w.id !== workspaceId);
       setWorkspaces(updatedList);
       const newActive = updatedList[0];
       setWorkspace(newActive);
-
-      persistState(
-        users,
-        newActive,
-        tasks,
-        activities,
-        notifications,
-        currentUser,
-        groups,
-        boards,
-        isAuthenticated,
-        updatedList
-      );
+      try {
+        localStorage.setItem(ACTIVE_WORKSPACE_KEY, newActive.id);
+      } catch {
+        // ignore — localStorage unavailable
+      }
       return true;
     },
-    [workspaces, users, tasks, activities, notifications, currentUser, groups, boards, isAuthenticated, persistState]
+    [workspaces]
   );
 
   const togglePinWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
-      try {
-        await fetch(`/api/workspaces/${workspaceId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "togglePin" }),
-        });
-      } catch (err) {
-        console.error("Failed to toggle pin on server:", err);
+      const res = await fetch(`/api/workspaces/${workspaceId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "togglePin" }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) {
+        throw new Error(result?.error || "Failed to toggle pin");
       }
+      const updated: Workspace = result.data;
 
-      const updatedList = workspaces.map((w) =>
-        w.id === workspaceId ? { ...w, isPinned: !w.isPinned } : w
-      );
-      setWorkspaces(updatedList);
-      const updatedCurrent = updatedList.find((w) => w.id === workspace.id) || updatedList[0];
-      setWorkspace(updatedCurrent);
-
-      persistState(
-        users,
-        updatedCurrent,
-        tasks,
-        activities,
-        notifications,
-        currentUser,
-        groups,
-        boards,
-        isAuthenticated,
-        updatedList
-      );
+      setWorkspaces((prev) => prev.map((w) => (w.id === workspaceId ? updated : w)));
+      setWorkspace((prev) => (prev.id === workspaceId ? updated : prev));
     },
-    [workspaces, workspace.id, users, tasks, activities, notifications, currentUser, groups, boards, isAuthenticated, persistState]
+    []
   );
 
   const createFolder = useCallback((name: string, color?: string) => {
@@ -1625,44 +1760,32 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       privacy?: BoardPrivacy;
       itemLabel?: string;
     }): Promise<Board> => {
-      let createdBoard: Board | null = null;
-      try {
-        const res = await fetch("/api/boards", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: data.name,
-            description: data.description || "",
-            color: data.color || "#3b82f6",
-            ownerId: currentUser.id,
-            workspaceId: workspace.id,
-            privacy: data.privacy || "main",
-          }),
-        });
-        const result = await res.json();
-        if (result?.success && result?.data) {
-          createdBoard = result.data;
-        }
-      } catch (err) {
-        console.error("Failed to create board on API:", err);
+      const res = await fetch("/api/boards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: data.name,
+          description: data.description || "",
+          color: data.color || "#3b82f6",
+          ownerId: currentUser.id,
+          workspaceId: workspace.id,
+          privacy: data.privacy || "main",
+        }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) {
+        throw new Error(result?.error || "Failed to create board");
       }
+      const createdBoard: Board = result.data;
 
       const now = Date.now();
 
-      // Always pin the board to the workspace it was created from
+      // Always pin the board to the workspace it was created from. The
+      // server also creates a starter "Active Items" group — replaced
+      // below with a richer client-side starter layout until groups/tasks
+      // move to the database too (next phase).
       const newBoard: Board = {
-        ...(createdBoard || {
-          id: `board-${now}`,
-          name: data.name,
-          description: data.description || "",
-          type: "project",
-          ownerId: currentUser.id,
-          color: data.color || "bg-blue-500",
-          memberIds: [currentUser.id],
-          isArchived: false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        }),
+        ...createdBoard,
         workspaceId: workspace.id,
         privacy: data.privacy || "main",
         groupIds: [],

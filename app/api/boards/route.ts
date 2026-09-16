@@ -29,6 +29,8 @@ export async function POST(request: Request) {
       type: body.type,
       color: body.color,
       ownerId: body.ownerId,
+      workspaceId: body.workspaceId,
+      privacy: body.privacy,
     });
 
     return NextResponse.json({ success: true, data: newBoard }, { status: 201 });

@@ -124,7 +124,9 @@ export function MondaySlideOver() {
   const handleAddSubtask = (e: React.FormEvent) => {
     e.preventDefault();
     if (newSubtaskTitle.trim()) {
-      addSubtask(task.id, newSubtaskTitle.trim());
+      addSubtask(task.id, newSubtaskTitle.trim()).catch((err) =>
+        console.error("Failed to add subtask:", err)
+      );
       setNewSubtaskTitle("");
     }
   };
@@ -132,7 +134,9 @@ export function MondaySlideOver() {
   const handlePostUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (newUpdateContent.trim()) {
-      addComment(task.id, newUpdateContent.trim());
+      addComment(task.id, newUpdateContent.trim()).catch((err) =>
+        console.error("Failed to add comment:", err)
+      );
       setNewUpdateContent("");
     }
   };

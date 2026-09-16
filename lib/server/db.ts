@@ -152,18 +152,75 @@ export function resetDb(): DatabaseSchema {
 const isPrismaEnabled = Boolean(process.env.DATABASE_URL && !process.env.VITEST);
 
 // ─── Workspace Operations ───────────────────────────────────────────────────
+// Prisma-backed (Postgres) is the source of truth; the local JSON file is
+// only a fallback for when the database is unreachable or in test mode.
 
-export async function getWorkspace(): Promise<Workspace> {
-  const db = readDb();
-  return db.workspace;
+function mapWorkspaceRow(row: {
+  id: string;
+  name: string;
+  description: string | null;
+  icon: string | null;
+  plan: string;
+  privacy: string;
+  avatarColor: string;
+  coverColor: string | null;
+  isPinned: boolean;
+  members: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+  lastViewedAt: Date;
+}): Workspace {
+  const rawMembers = Array.isArray(row.members) ? row.members : [];
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || "",
+    icon: row.icon || undefined,
+    plan: (row.plan as Workspace["plan"]) || "Pro",
+    privacy: (row.privacy as Workspace["privacy"]) || "open",
+    avatarColor: row.avatarColor,
+    coverColor: row.coverColor || undefined,
+    isPinned: row.isPinned,
+    members: rawMembers.map((m: any) => ({
+      ...m,
+      joinedAt: m.joinedAt ? new Date(m.joinedAt) : new Date(),
+    })),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    lastViewedAt: row.lastViewedAt,
+  };
 }
 
 export async function getWorkspaces(): Promise<Workspace[]> {
+  if (isPrismaEnabled) {
+    try {
+      const rows = await prisma.workspace.findMany({ orderBy: { createdAt: "asc" } });
+      // Return here unconditionally — an empty array is a legitimate,
+      // correct answer (no workspaces exist yet), not a signal to fall
+      // back to the stale local JSON file. Only a thrown error should.
+      return rows.map(mapWorkspaceRow);
+    } catch (e) {
+      console.warn("Prisma getWorkspaces fallback:", e);
+    }
+  }
   const db = readDb();
   return db.workspaces || [db.workspace];
 }
 
+export async function getWorkspace(): Promise<Workspace> {
+  const list = await getWorkspaces();
+  return list[0];
+}
+
 export async function getWorkspaceById(id: string): Promise<Workspace | undefined> {
+  if (isPrismaEnabled) {
+    try {
+      const row = await prisma.workspace.findUnique({ where: { id } });
+      if (row) return mapWorkspaceRow(row);
+    } catch (e) {
+      console.warn("Prisma getWorkspaceById fallback:", e);
+    }
+  }
   const db = readDb();
   const list = db.workspaces || [db.workspace];
   return list.find((w) => w.id === id);
@@ -174,32 +231,53 @@ export async function createWorkspace(data: {
   description?: string;
   privacy?: "open" | "closed";
   avatarColor?: string;
+  icon?: string;
+  coverColor?: string;
   creatorId?: string;
 }): Promise<Workspace> {
+  const id = `ws-${Date.now()}`;
+  const ownerId = data.creatorId || (await getUsers())[0]?.id || "user-somchai";
+  const members = [
+    { userId: ownerId, workspaceId: id, role: "owner" as const, joinedAt: new Date() },
+  ];
+
+  if (isPrismaEnabled) {
+    try {
+      const row = await prisma.workspace.create({
+        data: {
+          id,
+          name: data.name,
+          description: data.description || "",
+          privacy: data.privacy || "open",
+          avatarColor: data.avatarColor || "bg-indigo-600",
+          icon: data.icon,
+          coverColor: data.coverColor,
+          members: members as any,
+        },
+      });
+      return mapWorkspaceRow(row);
+    } catch (e) {
+      console.warn("Prisma createWorkspace fallback:", e);
+    }
+  }
+
   const db = readDb();
   const newWorkspace: Workspace = {
-    id: `ws-${Date.now()}`,
+    id,
     name: data.name,
     description: data.description || "",
     plan: "Pro",
     privacy: data.privacy || "open",
     avatarColor: data.avatarColor || "bg-indigo-600",
+    icon: data.icon,
+    coverColor: data.coverColor,
     isPinned: false,
-    members: [
-      {
-        userId: data.creatorId || (db.users[0]?.id || "user-somchai"),
-        workspaceId: `ws-${Date.now()}`,
-        role: "owner",
-        joinedAt: new Date(),
-      },
-    ],
+    members,
     createdAt: new Date(),
     updatedAt: new Date(),
     lastViewedAt: new Date(),
   };
-
-  const updatedWorkspaces = [...(db.workspaces || [db.workspace]), newWorkspace];
-  db.workspaces = updatedWorkspaces;
+  db.workspaces = [...(db.workspaces || [db.workspace]), newWorkspace];
   db.workspace = newWorkspace;
   writeDb(db);
   return newWorkspace;
@@ -209,45 +287,66 @@ export async function updateWorkspace(
   id: string,
   updates: Partial<Workspace>
 ): Promise<Workspace> {
+  if (isPrismaEnabled) {
+    try {
+      const row = await prisma.workspace.update({
+        where: { id },
+        data: {
+          ...(updates.name !== undefined && { name: updates.name }),
+          ...(updates.description !== undefined && { description: updates.description }),
+          ...(updates.privacy !== undefined && { privacy: updates.privacy }),
+          ...(updates.avatarColor !== undefined && { avatarColor: updates.avatarColor }),
+          ...(updates.icon !== undefined && { icon: updates.icon }),
+          ...(updates.coverColor !== undefined && { coverColor: updates.coverColor }),
+          ...(updates.isPinned !== undefined && { isPinned: updates.isPinned }),
+          ...(updates.members !== undefined && { members: updates.members as any }),
+          ...(updates.lastViewedAt !== undefined && { lastViewedAt: updates.lastViewedAt }),
+        },
+      });
+      return mapWorkspaceRow(row);
+    } catch (e) {
+      console.warn("Prisma updateWorkspace fallback:", e);
+    }
+  }
+
   const db = readDb();
   const list = db.workspaces || [db.workspace];
   const idx = list.findIndex((w) => w.id === id);
   if (idx === -1) throw new Error("Workspace not found");
-
-  const updated: Workspace = {
-    ...list[idx],
-    ...updates,
-    updatedAt: new Date(),
-  };
+  const updated: Workspace = { ...list[idx], ...updates, updatedAt: new Date() };
   list[idx] = updated;
   db.workspaces = list;
-  if (db.workspace.id === id) {
-    db.workspace = updated;
-  }
+  if (db.workspace.id === id) db.workspace = updated;
   writeDb(db);
   return updated;
 }
 
 export async function deleteWorkspace(id: string): Promise<boolean> {
-  const db = readDb();
-  const list = db.workspaces || [db.workspace];
-  if (list.length <= 1) {
+  const all = await getWorkspaces();
+  if (all.length <= 1) {
     throw new Error("Cannot delete the only workspace");
   }
-  db.workspaces = list.filter((w) => w.id !== id);
-  if (db.workspace.id === id) {
-    db.workspace = db.workspaces[0];
+
+  if (isPrismaEnabled) {
+    try {
+      await prisma.workspace.delete({ where: { id } });
+      return true;
+    } catch (e) {
+      console.warn("Prisma deleteWorkspace fallback:", e);
+    }
   }
+
+  const db = readDb();
+  const list = db.workspaces || [db.workspace];
+  db.workspaces = list.filter((w) => w.id !== id);
+  if (db.workspace.id === id) db.workspace = db.workspaces[0];
   writeDb(db);
   return true;
 }
 
 export async function togglePinWorkspace(id: string): Promise<Workspace> {
-  const db = readDb();
-  const list = db.workspaces || [db.workspace];
-  const target = list.find((w) => w.id === id);
+  const target = await getWorkspaceById(id);
   if (!target) throw new Error("Workspace not found");
-
   return updateWorkspace(id, { isPinned: !target.isPinned });
 }
 
@@ -257,17 +356,16 @@ export async function getUsers(): Promise<User[]> {
   if (isPrismaEnabled) {
     try {
       const users = await prisma.user.findMany({ where: { isActive: true } });
-      if (users.length > 0) {
-        return users.map((u) => ({
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          avatarInitials: u.avatarInitials,
-          avatarColor: u.avatarColor,
-          role: u.role,
-          isActive: u.isActive,
-        }));
-      }
+      // An empty array is a legitimate answer, not a signal to fall back.
+      return users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        avatarInitials: u.avatarInitials,
+        avatarColor: u.avatarColor,
+        role: u.role,
+        isActive: u.isActive,
+      }));
     } catch (e) {
       console.warn("Prisma getUsers fallback:", e);
     }
@@ -362,30 +460,30 @@ export async function getBoards(): Promise<Board[]> {
         include: { groups: true },
         orderBy: { createdAt: "asc" },
       });
-      if (boards.length > 0) {
-        return boards.map((b) => {
-          const rawMemberIds = (b as any).memberIds;
-          const memberIds =
-            Array.isArray(rawMemberIds) && rawMemberIds.length > 0
-              ? rawMemberIds
-              : [b.ownerId];
-          return {
-            id: b.id,
-            workspaceId: b.workspaceId,
-            name: b.name,
-            description: b.description || "",
-            type: (b.type as any) || "general",
-            color: b.color,
-            ownerId: b.ownerId,
-            memberIds,
-            groupIds: b.groups.map((g) => g.id),
-            isArchived: b.isArchived,
-            createdAt: b.createdAt,
-            updatedAt: b.updatedAt,
-            lastViewedAt: b.lastViewedAt,
-          };
-        });
-      }
+      // An empty array is a legitimate answer, not a signal to fall back.
+      return boards.map((b) => {
+        const rawMemberIds = (b as any).memberIds;
+        const memberIds =
+          Array.isArray(rawMemberIds) && rawMemberIds.length > 0
+            ? rawMemberIds
+            : [b.ownerId];
+        return {
+          id: b.id,
+          workspaceId: b.workspaceId,
+          name: b.name,
+          description: b.description || "",
+          type: (b.type as any) || "general",
+          color: b.color,
+          privacy: (b as any).privacy || "main",
+          ownerId: b.ownerId,
+          memberIds,
+          groupIds: b.groups.map((g) => g.id),
+          isArchived: b.isArchived,
+          createdAt: b.createdAt,
+          updatedAt: b.updatedAt,
+          lastViewedAt: b.lastViewedAt,
+        };
+      });
     } catch (e) {
       console.warn("Prisma getBoards fallback:", e);
     }
@@ -437,6 +535,8 @@ export async function createBoard(
         type?: Board["type"];
         color?: string;
         ownerId?: string;
+        workspaceId?: string;
+        privacy?: Board["privacy"];
       }
     | string,
   ownerId?: string
@@ -448,13 +548,19 @@ export async function createBoard(
 
   const db = readDb();
   const owner = data.ownerId || db.users[0]?.id || "user-somchai";
+  // Bug fixed: this used to silently ignore the caller's workspaceId and
+  // always attach the board to whatever workspace happened to be in the
+  // local JSON fallback file — meaning a board created for workspace B
+  // could end up filed under workspace A instead.
+  const workspaceId = data.workspaceId || db.workspace.id;
   const newBoard: Board = {
     id: `board-${Date.now()}`,
-    workspaceId: db.workspace.id,
+    workspaceId,
     name: data.name,
     description: data.description || "",
     type: data.type || "general",
     color: data.color || "bg-blue-500",
+    privacy: data.privacy || "main",
     ownerId: owner,
     memberIds: [owner],
     groupIds: [],
@@ -487,6 +593,7 @@ export async function createBoard(
           description: newBoard.description,
           type: newBoard.type,
           color: newBoard.color,
+          privacy: newBoard.privacy,
           ownerId: newBoard.ownerId,
           isArchived: false,
           groups: {
@@ -1161,17 +1268,16 @@ export async function getComments(taskId?: string): Promise<Comment[]> {
         where: taskId ? { taskId } : undefined,
         orderBy: { createdAt: "desc" },
       });
-      if (comments.length > 0) {
-        return comments.map((c) => ({
-          id: c.id,
-          taskId: c.taskId,
-          authorId: c.authorId,
-          content: c.content,
-          isEdited: c.isEdited,
-          createdAt: c.createdAt,
-          updatedAt: c.updatedAt,
-        }));
-      }
+      // An empty array is a legitimate answer, not a signal to fall back.
+      return comments.map((c) => ({
+        id: c.id,
+        taskId: c.taskId,
+        authorId: c.authorId,
+        content: c.content,
+        isEdited: c.isEdited,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      }));
     } catch (e) {
       console.warn("Prisma getComments fallback:", e);
     }
@@ -1238,18 +1344,17 @@ export async function getSubtasks(taskId?: string): Promise<Subtask[]> {
         where: taskId ? { taskId } : undefined,
         orderBy: { createdAt: "asc" },
       });
-      if (subs.length > 0) {
-        return subs.map((s) => ({
-          id: s.id,
-          taskId: s.taskId,
-          title: s.title,
-          isCompleted: s.isCompleted,
-          assigneeId: s.assigneeId,
-          dueDate: s.dueDate,
-          createdAt: s.createdAt,
-          updatedAt: s.updatedAt,
-        }));
-      }
+      // An empty array is a legitimate answer, not a signal to fall back.
+      return subs.map((s) => ({
+        id: s.id,
+        taskId: s.taskId,
+        title: s.title,
+        isCompleted: s.isCompleted,
+        assigneeId: s.assigneeId,
+        dueDate: s.dueDate,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+      }));
     } catch (e) {
       console.warn("Prisma getSubtasks fallback:", e);
     }
@@ -1342,17 +1447,16 @@ export async function getActivities(
         },
         orderBy: { createdAt: "desc" },
       });
-      if (acts.length > 0) {
-        return acts.map((a) => ({
-          id: a.id,
-          taskId: a.taskId || "task-1",
-          boardId: a.boardId || "board-1",
-          actorId: a.actorId,
-          type: a.type as any,
-          description: a.description,
-          createdAt: a.createdAt,
-        }));
-      }
+      // An empty array is a legitimate answer, not a signal to fall back.
+      return acts.map((a) => ({
+        id: a.id,
+        taskId: a.taskId || "task-1",
+        boardId: a.boardId || "board-1",
+        actorId: a.actorId,
+        type: a.type as any,
+        description: a.description,
+        createdAt: a.createdAt,
+      }));
     } catch (e) {
       console.warn("Prisma getActivities fallback:", e);
     }
@@ -1377,19 +1481,18 @@ export async function getNotifications(
         where: userId ? { userId } : undefined,
         orderBy: { createdAt: "desc" },
       });
-      if (notifs.length > 0) {
-        return notifs.map((n) => ({
-          id: n.id,
-          userId: n.userId,
-          type: n.type as any,
-          title: n.title,
-          body: n.body,
-          taskId: n.taskId,
-          boardId: n.boardId,
-          isRead: n.isRead,
-          createdAt: n.createdAt,
-        }));
-      }
+      // An empty array is a legitimate answer, not a signal to fall back.
+      return notifs.map((n) => ({
+        id: n.id,
+        userId: n.userId,
+        type: n.type as any,
+        title: n.title,
+        body: n.body,
+        taskId: n.taskId,
+        boardId: n.boardId,
+        isRead: n.isRead,
+        createdAt: n.createdAt,
+      }));
     } catch (e) {
       console.warn("Prisma getNotifications fallback:", e);
     }

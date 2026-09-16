@@ -107,7 +107,9 @@ export function TaskModal() {
   const handleAddSubtask = (e: React.FormEvent) => {
     e.preventDefault();
     if (newSubtaskTitle.trim()) {
-      addSubtask(task.id, newSubtaskTitle.trim());
+      addSubtask(task.id, newSubtaskTitle.trim()).catch((err) =>
+        console.error("Failed to add subtask:", err)
+      );
       setNewSubtaskTitle("");
     }
   };
@@ -115,7 +117,9 @@ export function TaskModal() {
   const handleAddComment = (e: React.FormEvent) => {
     e.preventDefault();
     if (newCommentContent.trim()) {
-      addComment(task.id, newCommentContent.trim());
+      addComment(task.id, newCommentContent.trim()).catch((err) =>
+        console.error("Failed to add comment:", err)
+      );
       setNewCommentContent("");
     }
   };

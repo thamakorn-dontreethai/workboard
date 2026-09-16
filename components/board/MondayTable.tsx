@@ -135,7 +135,7 @@ export function MondayTable({ boardId }: MondayTableProps) {
       groupId,
       status: "todo",
       priority: "medium",
-    });
+    }).catch((err) => console.error("Failed to create item:", err));
 
     setNewRowTitles((prev) => ({ ...prev, [groupId]: "" }));
   };
@@ -144,7 +144,9 @@ export function MondayTable({ boardId }: MondayTableProps) {
     e.preventDefault();
     if (!newGroupName.trim()) return;
     // Let addGroup pick a color that isn't already used on this board.
-    addGroup(boardId, newGroupName.trim());
+    addGroup(boardId, newGroupName.trim()).catch((err) =>
+      console.error("Failed to create group:", err)
+    );
     setNewGroupName("");
     setIsAddingGroup(false);
   };
@@ -486,7 +488,7 @@ export function MondayTable({ boardId }: MondayTableProps) {
                         groupId: group.id,
                         status: "todo",
                         priority: "medium",
-                      });
+                      }).catch((err) => console.error("Failed to create item:", err));
                     }}
                     className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
                   >
@@ -593,7 +595,7 @@ export function MondayTable({ boardId }: MondayTableProps) {
                         groupId: group.id,
                         status: "todo",
                         priority: "medium",
-                      });
+                      }).catch((err) => console.error("Failed to create item:", err));
                     }}
                     className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
                   >

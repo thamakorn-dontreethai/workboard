@@ -66,22 +66,26 @@ export function CreateTaskModal() {
 
   const availableGroups = groups.filter((g) => g.boardId === boardId);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !boardId || !groupId) return;
 
-    const newTask = createTask({
-      title: title.trim(),
-      description: description.trim(),
-      boardId,
-      groupId,
-      assigneeId,
-      priority,
-      dueDate: dueDateStr ? new Date(dueDateStr) : null,
-    });
+    try {
+      const newTask = await createTask({
+        title: title.trim(),
+        description: description.trim(),
+        boardId,
+        groupId,
+        assigneeId,
+        priority,
+        dueDate: dueDateStr ? new Date(dueDateStr) : null,
+      });
 
-    closeCreateTaskModal();
-    openTaskModal(newTask.id);
+      closeCreateTaskModal();
+      openTaskModal(newTask.id);
+    } catch (error) {
+      console.error("Failed to create task:", error);
+    }
   };
 
   if (!isCreateTaskOpen) return null;
