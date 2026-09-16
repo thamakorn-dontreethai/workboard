@@ -17,7 +17,6 @@ import {
   Trash2,
   Edit2,
   Check,
-  ChevronDown,
   Sparkles,
   MessageSquare,
   UserPlus,
@@ -35,8 +34,15 @@ import {
   ImagePlus,
   Send,
   X,
+  Upload,
+  Download,
+  File as FileIcon,
+  FileSpreadsheet,
+  FileImage,
+  FileArchive,
+  Box,
 } from "lucide-react";
-import type { Post } from "@/types";
+import type { Post, WorkspaceFile } from "@/types";
 import { formatDate } from "@/lib/utils/date";
 
 import { CoverColorPicker } from "@/components/workspace/CoverColorPicker";
@@ -79,7 +85,7 @@ export default function WorkspacePage() {
   }, [workspaceId, workspace.id, workspaces, switchWorkspace]);
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<"posts" | "content" | "permissions">(
+  const [activeTab, setActiveTab] = useState<"posts" | "content" | "files" | "permissions">(
     "posts"
   );
 
@@ -253,6 +259,110 @@ export default function WorkspacePage() {
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
+
+  // ─── Files (document library, scoped to this workspace) ─────────────────
+  const [files, setFiles] = useState<WorkspaceFile[]>([]);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [fileUploadError, setFileUploadError] = useState<string | null>(null);
+  const [fileSearch, setFileSearch] = useState("");
+  const fileUploadInputRef = useRef<HTMLInputElement>(null);
+  const MAX_FILE_BYTES = 15 * 1024 * 1024;
+
+  useEffect(() => {
+    if (!currentWs?.id || activeTab !== "files") return;
+    let cancelled = false;
+    setIsLoadingFiles(true);
+    fetch(`/api/files?workspaceId=${encodeURIComponent(currentWs.id)}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (cancelled || !res?.success || !Array.isArray(res.data)) return;
+        setFiles(
+          res.data.map((f: WorkspaceFile) => ({ ...f, createdAt: new Date(f.createdAt) }))
+        );
+      })
+      .catch((err) => console.error("Failed to load files:", err))
+      .finally(() => {
+        if (!cancelled) setIsLoadingFiles(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWs?.id, activeTab]);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !currentWs?.id) return;
+
+    setFileUploadError(null);
+    if (file.size > MAX_FILE_BYTES) {
+      setFileUploadError(
+        `"${file.name}" is too large — the limit is ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))}MB.`
+      );
+      return;
+    }
+
+    setIsUploadingFile(true);
+    try {
+      const dataUrl = await readImageAsDataUrl(file);
+      const res = await fetch("/api/files", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: currentWs.id,
+          name: file.name,
+          mimeType: file.type || "application/octet-stream",
+          size: file.size,
+          dataUrl,
+          uploadedById: currentUser.id,
+        }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) throw new Error(result?.error);
+      const uploaded: WorkspaceFile = {
+        ...result.data,
+        createdAt: new Date(result.data.createdAt),
+      };
+      setFiles((prev) => [uploaded, ...prev]);
+    } catch (err: any) {
+      setFileUploadError(err.message || "Failed to upload file.");
+    } finally {
+      setIsUploadingFile(false);
+    }
+  };
+
+  const handleDeleteFile = async (fileId: string, fileName: string) => {
+    if (!confirm(`Delete "${fileName}"? This can't be undone.`)) return;
+    try {
+      const res = await fetch(`/api/files/${fileId}`, { method: "DELETE" });
+      const result = await res.json();
+      if (!result?.success) throw new Error(result?.error);
+      setFiles((prev) => prev.filter((f) => f.id !== fileId));
+    } catch (err) {
+      console.error("Failed to delete file:", err);
+    }
+  };
+
+  const getFileIcon = (mimeType: string, name: string) => {
+    const ext = name.split(".").pop()?.toLowerCase() || "";
+    if (mimeType.startsWith("image/")) return FileImage;
+    if (mimeType === "application/pdf" || ext === "pdf") return FileText;
+    if (["xls", "xlsx", "csv"].includes(ext)) return FileSpreadsheet;
+    if (["zip", "rar", "7z", "tar", "gz"].includes(ext)) return FileArchive;
+    if (["glb", "gltf", "obj", "fbx", "stl", "3ds", "blend", "usdz"].includes(ext)) return Box;
+    return FileIcon;
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const filteredFiles = files.filter((f) =>
+    f.name.toLowerCase().includes(fileSearch.toLowerCase())
+  );
 
   const handlePostImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -484,7 +594,7 @@ export default function WorkspacePage() {
                       />
                     </div>
                   ) : (
-                    <div className="relative flex items-center gap-2" ref={menuRef}>
+                    <div className="flex items-center gap-2">
                       <h1
                         onClick={() => setIsEditingName(true)}
                         className="text-[32px] font-semibold text-white tracking-tight cursor-pointer hover:text-zinc-200 transition-colors leading-tight"
@@ -492,80 +602,6 @@ export default function WorkspacePage() {
                       >
                         {currentWs.name || "Workspace"}
                       </h1>
-
-                      <button
-                        type="button"
-                        onClick={() => setIsMenuOpen(!isMenuOpen)}
-                        className="text-zinc-200 hover:text-white p-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
-                        title="Workspace options"
-                      >
-                        <ChevronDown className="h-5 w-5" />
-                      </button>
-
-                      {/* Dropdown Menu (Rename, Icon color, Privacy, Delete) */}
-                      {isMenuOpen && (
-                        <div className="absolute left-0 top-full mt-2 w-52 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-xs z-50 animate-in fade-in zoom-in-95">
-                          <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                            Workspace Settings
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsMenuOpen(false);
-                              setIsEditingName(true);
-                            }}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
-                          >
-                            <Edit2 className="h-3.5 w-3.5 text-blue-400" />
-                            <span>Rename workspace</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsMenuOpen(false);
-                              setIsAvatarPickerOpen(true);
-                            }}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
-                          >
-                            <Palette className="h-3.5 w-3.5 text-amber-400" />
-                            <span>Change icon color</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={handleTogglePrivacy}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
-                          >
-                            {currentWs.privacy === "closed" ? (
-                              <>
-                                <Globe className="h-3.5 w-3.5 text-emerald-400" />
-                                <span>Change to Open</span>
-                              </>
-                            ) : (
-                              <>
-                                <Lock className="h-3.5 w-3.5 text-amber-400" />
-                                <span>Change to Closed</span>
-                              </>
-                            )}
-                          </button>
-
-                          <div className="my-1 border-t border-zinc-800" />
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsMenuOpen(false);
-                              setIsDeleteDialogOpen(true);
-                            }}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors text-left font-medium cursor-pointer"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            <span>Delete workspace</span>
-                          </button>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
@@ -601,7 +637,7 @@ export default function WorkspacePage() {
               </div>
             </div>
 
-            {/* Right Actions: Feedback, Avatar, Invite / 1, ••• (Firmly in dark area) */}
+            {/* Right Actions: Feedback, Avatar, ••• (Firmly in dark area) */}
             <div className="flex items-center gap-5 pt-4">
               {/* Feedback */}
               <button
@@ -617,32 +653,92 @@ export default function WorkspacePage() {
                 <User className="h-5 w-5 fill-white" />
               </div>
 
-              {/* Invite / 1 Button (Matching Blue Pill Button in Photo) */}
-              <button
-                type="button"
-                onClick={openInviteMemberModal}
-                className="px-2.5 rounded bg-[#0073ea] hover:bg-[#0060c0] text-white text-sm font-medium h-8 flex items-center shadow-xs transition-colors cursor-pointer"
-              >
-                Invite / {currentWs.members?.length || 1}
-              </button>
-
               {/* Three Dots Menu Button */}
-              <button
-                type="button"
-                onClick={() => setIsMenuOpen(!isMenuOpen)}
-                className="text-white p-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
-              >
-                <MoreHorizontal className="h-5 w-5" />
-              </button>
+              <div className="relative" ref={menuRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsMenuOpen(!isMenuOpen)}
+                  className="text-white p-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Workspace options"
+                >
+                  <MoreHorizontal className="h-5 w-5" />
+                </button>
+
+                {/* Dropdown Menu (Rename, Icon color, Privacy, Delete) */}
+                {isMenuOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-52 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-xs z-50 animate-in fade-in zoom-in-95">
+                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                      Workspace Settings
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        setIsEditingName(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+                    >
+                      <Edit2 className="h-3.5 w-3.5 text-blue-400" />
+                      <span>Rename workspace</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        setIsAvatarPickerOpen(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+                    >
+                      <Palette className="h-3.5 w-3.5 text-amber-400" />
+                      <span>Change icon color</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleTogglePrivacy}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+                    >
+                      {currentWs.privacy === "closed" ? (
+                        <>
+                          <Globe className="h-3.5 w-3.5 text-emerald-400" />
+                          <span>Change to Open</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="h-3.5 w-3.5 text-amber-400" />
+                          <span>Change to Closed</span>
+                        </>
+                      )}
+                    </button>
+
+                    <div className="my-1 border-t border-zinc-800" />
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        setIsDeleteDialogOpen(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors text-left font-medium cursor-pointer"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Delete workspace</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* ─── 3. TABS (Posts | Content | Member) ─────────────────────────── */}
+          {/* ─── 3. TABS (Posts | Content | Files | Member) ─────────────────── */}
           <div className="flex items-center border-b border-zinc-600 mt-8">
             {(
               [
                 { id: "posts", label: "Posts", icon: MessageSquare },
                 { id: "content", label: "Content", icon: SquarePen },
+                { id: "files", label: "Files", icon: FileIcon },
                 { id: "permissions", label: "Member", icon: Lock },
               ] as const
             ).map(({ id, label, icon: Icon }) => (
@@ -998,6 +1094,111 @@ export default function WorkspacePage() {
                   </Link>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* TAB: FILES (document library — PDF, Word, Excel, 3D models, etc.) */}
+          {activeTab === "files" && (
+            <div className="py-4 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="relative w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+                  <input
+                    type="text"
+                    value={fileSearch}
+                    onChange={(e) => setFileSearch(e.target.value)}
+                    placeholder="Search files..."
+                    className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#0073ea]"
+                  />
+                </div>
+
+                <input
+                  ref={fileUploadInputRef}
+                  type="file"
+                  hidden
+                  onChange={handleFileSelect}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileUploadInputRef.current?.click()}
+                  disabled={isUploadingFile}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0073ea] hover:bg-[#0060c0] disabled:opacity-50 text-white text-xs font-semibold shadow-xs transition-colors shrink-0"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  <span>{isUploadingFile ? "Uploading..." : "Upload File"}</span>
+                </button>
+              </div>
+
+              <p className="text-[11px] text-zinc-500">
+                PDF, Word, Excel, images, 3D models (.glb, .obj, .stl, ...) — any file type, up to{" "}
+                {Math.floor(MAX_FILE_BYTES / (1024 * 1024))}MB.
+              </p>
+
+              {fileUploadError && (
+                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  <span>{fileUploadError}</span>
+                </div>
+              )}
+
+              {isLoadingFiles ? (
+                <div className="py-16 text-center text-xs text-zinc-500">Loading files...</div>
+              ) : filteredFiles.length === 0 ? (
+                <div className="py-16 text-center rounded-2xl border border-dashed border-zinc-800 space-y-2">
+                  <FileIcon className="h-8 w-8 text-zinc-600 mx-auto" />
+                  <p className="text-sm font-semibold text-zinc-300">
+                    {files.length === 0 ? "No files yet" : "No files match your search"}
+                  </p>
+                  {files.length === 0 && (
+                    <p className="text-xs text-zinc-500">
+                      Upload documents, spreadsheets, or 3D models for this workspace.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="divide-y divide-zinc-800/60">
+                  {filteredFiles.map((f) => {
+                    const Icon = getFileIcon(f.mimeType, f.name);
+                    const uploader = users.find((u) => u.id === f.uploadedById);
+                    return (
+                      <div
+                        key={f.id}
+                        className="group flex items-center justify-between gap-3 py-3 px-1 hover:bg-zinc-800/20 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <Icon className="h-4 w-4 text-zinc-400 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-white truncate">{f.name}</p>
+                            <p className="text-[10px] text-zinc-500">
+                              {formatFileSize(f.size)} · {uploader?.name || "Unknown"} ·{" "}
+                              {formatDate(f.createdAt)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          <a
+                            href={f.dataUrl}
+                            download={f.name}
+                            title="Download"
+                            className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteFile(f.id, f.name)}
+                            title="Delete"
+                            className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

@@ -19,7 +19,6 @@ export function InviteMemberModal() {
   const { isInviteMemberOpen, closeInviteMemberModal, inviteMember } =
     useWorkBoard();
 
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"owner" | "admin" | "member" | "viewer">(
     "member"
@@ -33,12 +32,19 @@ export function InviteMemberModal() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !email.trim() || isSubmitting) return;
+    if (!email.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
     try {
+      // No name is collected up front — derive a placeholder from the
+      // email's local part, same fallback used when a board-invite
+      // recipient signs up without ever having a name on file.
+      const namePart = email.trim().split("@")[0];
+      const placeholderName =
+        namePart.charAt(0).toUpperCase() + namePart.slice(1);
+
       const res = await inviteMember({
-        name: name.trim(),
+        name: placeholderName,
         email: email.trim(),
         role,
       });
@@ -67,7 +73,6 @@ export function InviteMemberModal() {
 
   const handleReset = () => {
     setSuccessMsg(false);
-    setName("");
     setEmail("");
     setRole("member");
     setGeneratedInviteLink("");
@@ -149,7 +154,7 @@ export function InviteMemberModal() {
               <div className="text-xs">
                 <p className="font-semibold text-white">Invitation Created Successfully!</p>
                 <p className="text-zinc-300 mt-0.5">
-                  An invite has been generated for <strong>{name}</strong> ({email}) as <strong>{role}</strong>.
+                  An invite has been generated for <strong>{email}</strong> as <strong>{role}</strong>.
                 </p>
               </div>
             </div>
@@ -210,26 +215,12 @@ export function InviteMemberModal() {
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-zinc-300">
-                Full Name <span className="text-red-400">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                autoFocus
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Jordan Hayes"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-sm text-white placeholder:text-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-zinc-300">
                 Email Address <span className="text-red-400">*</span>
               </label>
               <input
                 type="email"
                 required
+                autoFocus
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="colleague@company.com"
@@ -289,7 +280,7 @@ export function InviteMemberModal() {
               </button>
               <button
                 type="submit"
-                disabled={!name.trim() || !email.trim() || isSubmitting}
+                disabled={!email.trim() || isSubmitting}
                 className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 transition-colors disabled:opacity-50"
               >
                 <UserPlus className="h-3.5 w-3.5" />

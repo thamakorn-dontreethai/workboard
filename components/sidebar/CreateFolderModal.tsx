@@ -23,15 +23,20 @@ export function CreateFolderModal() {
     { name: "Indigo", class: "text-indigo-400", bg: "bg-indigo-400/15" },
   ];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!folderName.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
-    createFolder(folderName.trim(), selectedColor);
-    setFolderName("");
-    setIsSubmitting(false);
-    closeCreateFolderModal();
+    try {
+      await createFolder(folderName.trim(), selectedColor);
+      setFolderName("");
+      closeCreateFolderModal();
+    } catch (err) {
+      console.error("Failed to create folder:", err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

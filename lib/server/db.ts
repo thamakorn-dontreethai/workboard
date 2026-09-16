@@ -13,6 +13,8 @@ import {
   Notification,
   PersonalTodo,
   Post,
+  Folder,
+  WorkspaceFile,
   TaskStatus,
   TaskPriority,
   BoardInvitation,
@@ -29,6 +31,7 @@ import {
   MOCK_ACTIVITIES,
   MOCK_NOTIFICATIONS,
   MOCK_PERSONAL_TODOS,
+  MOCK_FOLDERS,
 } from "@/lib/mock/data";
 
 export interface DatabaseSchema {
@@ -43,6 +46,7 @@ export interface DatabaseSchema {
   activities: Activity[];
   notifications: Notification[];
   personalTodos?: PersonalTodo[];
+  folders?: Folder[];
   invitations?: BoardInvitation[];
 }
 
@@ -76,6 +80,7 @@ function getInitialData(): DatabaseSchema {
     activities: MOCK_ACTIVITIES,
     notifications: MOCK_NOTIFICATIONS,
     personalTodos: MOCK_PERSONAL_TODOS,
+    folders: MOCK_FOLDERS,
     invitations: [],
   };
 }
@@ -131,6 +136,11 @@ export function readDb(): DatabaseSchema {
         reminderSentAt: t.reminderSentAt ? new Date(t.reminderSentAt) : null,
         createdAt: new Date(t.createdAt),
         updatedAt: new Date(t.updatedAt),
+      })),
+      folders: (data.folders || []).map((f: any) => ({
+        ...f,
+        createdAt: new Date(f.createdAt),
+        updatedAt: new Date(f.updatedAt),
       })),
       invitations: (data.invitations || []).map((i: any) => ({
         ...i,
@@ -346,11 +356,11 @@ export async function updateWorkspace(
 }
 
 export async function deleteWorkspace(id: string): Promise<boolean> {
-  const all = await getWorkspaces();
-  if (all.length <= 1) {
-    throw new Error("Cannot delete the only workspace");
-  }
-
+  // No system-wide "keep at least one workspace" guard — that counted
+  // every workspace across every user, which was never the right check
+  // (and blocked users from deleting their own sole workspace even though
+  // plenty of other workspaces existed system-wide, just none of them
+  // theirs).
   if (isPrismaEnabled) {
     try {
       await prisma.workspace.delete({ where: { id } });
@@ -494,6 +504,7 @@ export async function getBoards(): Promise<Board[]> {
         return {
           id: b.id,
           workspaceId: b.workspaceId,
+          folderId: (b as any).folderId || undefined,
           name: b.name,
           description: b.description || "",
           type: (b.type as any) || "general",
@@ -531,6 +542,7 @@ export async function getBoardById(id: string): Promise<Board | undefined> {
         return {
           id: b.id,
           workspaceId: b.workspaceId,
+          folderId: (b as any).folderId || undefined,
           name: b.name,
           description: b.description || "",
           type: (b.type as any) || "general",
@@ -644,7 +656,7 @@ export async function createBoard(
 
 export async function updateBoard(
   id: string,
-  updates: Partial<Pick<Board, "name" | "description" | "color" | "isArchived">>
+  updates: Partial<Pick<Board, "name" | "description" | "color" | "isArchived" | "folderId">>
 ): Promise<Board | null> {
   if (isPrismaEnabled) {
     try {
@@ -659,12 +671,16 @@ export async function updateBoard(
           ...(updates.isArchived !== undefined && {
             isArchived: updates.isArchived,
           }),
+          ...(updates.folderId !== undefined && {
+            folderId: updates.folderId || null,
+          }),
         },
         include: { groups: true },
       });
       return {
         id: updated.id,
         workspaceId: updated.workspaceId,
+        folderId: (updated as any).folderId || undefined,
         name: updated.name,
         description: updated.description || "",
         type: (updated.type as any) || "general",
@@ -717,6 +733,162 @@ export async function deleteBoard(id: string): Promise<boolean> {
     return true;
   }
   return prismaSuccess;
+}
+
+// ─── Folder Operations (organize boards within a workspace) ────────────────
+
+export async function getFolders(workspaceId?: string): Promise<Folder[]> {
+  if (isPrismaEnabled) {
+    try {
+      const rows = await prisma.folder.findMany({
+        where: workspaceId ? { workspaceId } : undefined,
+        orderBy: { createdAt: "asc" },
+      });
+      return rows.map((f) => ({
+        id: f.id,
+        workspaceId: f.workspaceId,
+        name: f.name,
+        color: f.color,
+        isCollapsed: f.isCollapsed,
+        createdAt: f.createdAt,
+        updatedAt: f.updatedAt,
+      }));
+    } catch (e) {
+      console.warn("Prisma getFolders fallback:", e);
+    }
+  }
+
+  const db = readDb();
+  const list = db.folders || [];
+  return workspaceId ? list.filter((f) => f.workspaceId === workspaceId) : list;
+}
+
+export async function createFolder(data: {
+  workspaceId: string;
+  name: string;
+  color?: string;
+}): Promise<Folder> {
+  const id = `folder-${Date.now()}`;
+  const now = new Date();
+  const newFolder: Folder = {
+    id,
+    workspaceId: data.workspaceId,
+    name: data.name,
+    color: data.color || "text-amber-400",
+    isCollapsed: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  if (isPrismaEnabled) {
+    try {
+      const row = await prisma.folder.create({
+        data: {
+          id,
+          workspaceId: newFolder.workspaceId,
+          name: newFolder.name,
+          color: newFolder.color,
+        },
+      });
+      return {
+        id: row.id,
+        workspaceId: row.workspaceId,
+        name: row.name,
+        color: row.color,
+        isCollapsed: row.isCollapsed,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    } catch (e) {
+      console.warn("Prisma createFolder fallback:", e);
+    }
+  }
+
+  const db = readDb();
+  db.folders = [...(db.folders || []), newFolder];
+  writeDb(db);
+  return newFolder;
+}
+
+export async function updateFolder(
+  id: string,
+  updates: Partial<Pick<Folder, "name" | "color" | "isCollapsed">>
+): Promise<Folder | null> {
+  if (isPrismaEnabled) {
+    try {
+      const row = await prisma.folder.update({
+        where: { id },
+        data: {
+          ...(updates.name !== undefined && { name: updates.name }),
+          ...(updates.color !== undefined && { color: updates.color }),
+          ...(updates.isCollapsed !== undefined && { isCollapsed: updates.isCollapsed }),
+        },
+      });
+      return {
+        id: row.id,
+        workspaceId: row.workspaceId,
+        name: row.name,
+        color: row.color,
+        isCollapsed: row.isCollapsed,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    } catch (e) {
+      console.warn("Prisma updateFolder fallback:", e);
+    }
+  }
+
+  const db = readDb();
+  const folder = (db.folders || []).find((f) => f.id === id);
+  if (!folder) return null;
+  Object.assign(folder, updates, { updatedAt: new Date() });
+  writeDb(db);
+  return folder;
+}
+
+// Moves every board out of a folder (sets folderId to null) without
+// deleting the folder itself — the "empty this folder" action.
+export async function emptyFolder(id: string): Promise<boolean> {
+  if (isPrismaEnabled) {
+    try {
+      await prisma.board.updateMany({
+        where: { folderId: id },
+        data: { folderId: null },
+      });
+    } catch (e) {
+      console.warn("Prisma emptyFolder fallback:", e);
+    }
+  }
+
+  const db = readDb();
+  db.boards.forEach((b) => {
+    if (b.folderId === id) b.folderId = undefined;
+  });
+  writeDb(db);
+  return true;
+}
+
+export async function deleteFolder(id: string): Promise<boolean> {
+  if (isPrismaEnabled) {
+    try {
+      // onDelete: SetNull on Board.folderId means Postgres automatically
+      // moves every board in this folder back out, rather than deleting
+      // them — a folder is just organization, not ownership.
+      await prisma.folder.delete({ where: { id } });
+      return true;
+    } catch (e) {
+      console.warn("Prisma deleteFolder fallback:", e);
+    }
+  }
+
+  const db = readDb();
+  db.boards.forEach((b) => {
+    if (b.folderId === id) b.folderId = undefined;
+  });
+  const before = (db.folders || []).length;
+  db.folders = (db.folders || []).filter((f) => f.id !== id);
+  writeDb(db);
+  return (db.folders || []).length < before;
 }
 
 // ─── Groups Operations ───────────────────────────────────────────────────────
@@ -1926,6 +2098,92 @@ export async function setPostReaction(
   } catch (e) {
     console.warn("Prisma setPostReaction failed:", e);
     return null;
+  }
+}
+
+// ─── Workspace Files (document library) ─────────────────────────────────────
+// DB-only, same reasoning as Posts — a new feature, no local-JSON fallback
+// (and that fallback is unreliable on serverless anyway).
+
+// The file itself is stored inline as base64 (same approach already used
+// for workspace cover images), so a hard size cap keeps Postgres rows from
+// growing unbounded — this is a document library, not object storage for
+// large media.
+const MAX_FILE_BYTES = 15 * 1024 * 1024;
+
+function mapFileRow(row: {
+  id: string;
+  workspaceId: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  dataUrl: string;
+  uploadedById: string;
+  createdAt: Date;
+}): WorkspaceFile {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    name: row.name,
+    mimeType: row.mimeType,
+    size: row.size,
+    dataUrl: row.dataUrl,
+    uploadedById: row.uploadedById,
+    createdAt: row.createdAt,
+  };
+}
+
+export async function getFiles(workspaceId: string): Promise<WorkspaceFile[]> {
+  if (!isPrismaEnabled) return [];
+  try {
+    const rows = await prisma.fileItem.findMany({
+      where: { workspaceId },
+      orderBy: { createdAt: "desc" },
+    });
+    return rows.map(mapFileRow);
+  } catch (e) {
+    console.warn("Prisma getFiles failed:", e);
+    return [];
+  }
+}
+
+export async function uploadFile(data: {
+  workspaceId: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  dataUrl: string;
+  uploadedById: string;
+}): Promise<WorkspaceFile> {
+  if (data.size > MAX_FILE_BYTES) {
+    throw new Error(
+      `File is too large — the limit is ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))}MB.`
+    );
+  }
+  if (!isPrismaEnabled) {
+    throw new Error("File storage is unavailable right now.");
+  }
+  const row = await prisma.fileItem.create({
+    data: {
+      workspaceId: data.workspaceId,
+      name: data.name,
+      mimeType: data.mimeType,
+      size: data.size,
+      dataUrl: data.dataUrl,
+      uploadedById: data.uploadedById,
+    },
+  });
+  return mapFileRow(row);
+}
+
+export async function deleteFile(id: string): Promise<boolean> {
+  if (!isPrismaEnabled) return false;
+  try {
+    await prisma.fileItem.delete({ where: { id } });
+    return true;
+  } catch (e) {
+    console.warn("Prisma deleteFile failed:", e);
+    return false;
   }
 }
 

@@ -41,6 +41,24 @@ function AppShellInner({ children }: AppShellProps) {
     }
   }, [isHydrated, isAuthenticated, isAuthPage, router]);
 
+  // Dragging a file (e.g. an image) onto the page anywhere outside an
+  // actual drop zone is the browser's cue to navigate the whole tab to
+  // that file, replacing the app — it looks exactly like the page
+  // "freezing". Our own drop targets (folder rows, photo attach fields)
+  // already call preventDefault() themselves; this is just the safety net
+  // for everywhere else, so a stray drop never blows away the app.
+  useEffect(() => {
+    const blockDefaultFileDrop = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("dragover", blockDefaultFileDrop);
+    window.addEventListener("drop", blockDefaultFileDrop);
+    return () => {
+      window.removeEventListener("dragover", blockDefaultFileDrop);
+      window.removeEventListener("drop", blockDefaultFileDrop);
+    };
+  }, []);
+
   // Desktop sidebar collapsed state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Mobile drawer open state

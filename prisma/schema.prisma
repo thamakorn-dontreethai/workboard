@@ -29,6 +29,8 @@ model Workspace {
   lastViewedAt DateTime @default(now())
   boards       Board[]
   posts        Post[]
+  folders      Folder[]
+  files        FileItem[]
 }
 
 model User {
@@ -52,12 +54,15 @@ model User {
   posts          Post[]
   postComments   PostComment[]
   postReactions  PostReaction[]
+  uploadedFiles  FileItem[]
 }
 
 model Board {
   id           String     @id @default(cuid())
   workspaceId  String
   workspace    Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folderId     String?
+  folder       Folder?    @relation(fields: [folderId], references: [id], onDelete: SetNull)
   name         String
   description  String?    @default("")
   type         String     @default("general")
@@ -76,6 +81,40 @@ model Board {
 
   @@index([workspaceId])
   @@index([ownerId])
+  @@index([folderId])
+}
+
+model Folder {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  color       String   @default("text-amber-400")
+  isCollapsed Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  boards      Board[]
+
+  @@index([workspaceId])
+}
+
+// Workspace file storage (PDF, Word, Excel, images, 3D models, etc.) — the
+// bytes are stored as a base64 data URL, same approach already used for
+// workspace cover images / avatars, so no separate object storage service
+// is needed. Fine for a document library; not meant for huge media files.
+model FileItem {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name         String
+  mimeType     String
+  size         Int
+  dataUrl      String   @db.Text
+  uploadedById String
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+
+  @@index([workspaceId])
 }
 
 model BoardInvitation {

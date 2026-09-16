@@ -31,8 +31,11 @@ import {
   Pin,
   Globe,
   Lock,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { WorkspaceAvatar } from "@/components/workspace/WorkspaceAvatar";
+import { FloatingPanel } from "@/components/board/FloatingPanel";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -67,6 +70,13 @@ export function Sidebar({
     openCreateFolderModal,
     openCreateDashboardModal,
     openInviteMemberModal,
+    updateBoard,
+    deleteBoard,
+    createBoard,
+    updateFolder,
+    toggleFolderCollapse,
+    emptyFolder,
+    deleteFolder,
   } = useWorkBoard();
 
   const [isFavoritesOpen, setIsFavoritesOpen] = useState(false);
@@ -81,6 +91,403 @@ export function Sidebar({
 
   const workspaceDropdownRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
+
+  // Right-click or "..." on a board row in the Projects list, to rename or
+  // delete it without leaving the sidebar.
+  const [boardMenuId, setBoardMenuId] = useState<string | null>(null);
+  const boardMenuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [editingBoardId, setEditingBoardId] = useState<string | null>(null);
+  const [boardNameInput, setBoardNameInput] = useState("");
+
+  const handleRenameBoardStart = (boardId: string, currentName: string) => {
+    setBoardMenuId(null);
+    setEditingBoardId(boardId);
+    setBoardNameInput(currentName);
+  };
+
+  const handleRenameBoardSave = (boardId: string) => {
+    const trimmed = boardNameInput.trim();
+    setEditingBoardId(null);
+    if (trimmed) updateBoard(boardId, { name: trimmed });
+  };
+
+  const handleDeleteBoard = (boardId: string, boardName: string) => {
+    setBoardMenuId(null);
+    if (confirm(`Delete "${boardName}"? This can't be undone.`)) {
+      deleteBoard(boardId);
+    }
+  };
+
+  // Drag a board row onto a folder row to move it in; drag it into the
+  // ungrouped area below to move it back out.
+  const [draggingBoardId, setDraggingBoardId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [isDragOverUngrouped, setIsDragOverUngrouped] = useState(false);
+
+  const handleDropOnFolder = (folderId: string) => {
+    if (draggingBoardId) updateBoard(draggingBoardId, { folderId });
+    setDraggingBoardId(null);
+    setDragOverFolderId(null);
+  };
+
+  const handleDropOnUngrouped = () => {
+    if (draggingBoardId) updateBoard(draggingBoardId, { folderId: null });
+    setDraggingBoardId(null);
+    setIsDragOverUngrouped(false);
+  };
+
+  // Folder "..." menu: rename, change color, new board inside, empty, delete.
+  const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
+  const folderMenuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [folderNameInput, setFolderNameInput] = useState("");
+
+  const FOLDER_COLORS = [
+    { name: "Amber", class: "text-amber-400" },
+    { name: "Blue", class: "text-blue-400" },
+    { name: "Emerald", class: "text-emerald-400" },
+    { name: "Purple", class: "text-purple-400" },
+    { name: "Rose", class: "text-rose-400" },
+    { name: "Indigo", class: "text-indigo-400" },
+  ];
+
+  const handleRenameFolderStart = (folderId: string, currentName: string) => {
+    setFolderMenuId(null);
+    setEditingFolderId(folderId);
+    setFolderNameInput(currentName);
+  };
+
+  const handleRenameFolderSave = (folderId: string) => {
+    const trimmed = folderNameInput.trim();
+    setEditingFolderId(null);
+    if (trimmed) updateFolder(folderId, { name: trimmed });
+  };
+
+  const handleNewBoardInFolder = async (folderId: string) => {
+    setFolderMenuId(null);
+    try {
+      const newBoard = await createBoard({ name: "New Board", folderId });
+      setEditingBoardId(newBoard.id);
+      setBoardNameInput(newBoard.name);
+    } catch (err) {
+      console.error("Failed to create board in folder:", err);
+    }
+  };
+
+  const handleEmptyFolder = (folderId: string, folderName: string) => {
+    setFolderMenuId(null);
+    if (confirm(`Move all boards out of "${folderName}"?`)) {
+      emptyFolder(folderId);
+    }
+  };
+
+  const handleDeleteFolder = (folderId: string, folderName: string) => {
+    setFolderMenuId(null);
+    if (
+      confirm(
+        `Delete folder "${folderName}"? Boards inside will move back to the main list — they won't be deleted.`
+      )
+    ) {
+      deleteFolder(folderId);
+    }
+  };
+
+  const renderBoardRow = (b: (typeof boards)[number], opts: { indent?: boolean } = {}) => {
+    const isActive = pathname === `/board/${b.id}`;
+    const taskCount = tasks.filter((t) => t.boardId === b.id && !t.isArchived).length;
+
+    if (editingBoardId === b.id) {
+      return (
+        <div
+          key={b.id}
+          className={`flex items-center gap-2.5 rounded-lg py-2 text-xs bg-[#232533] ${opts.indent ? "pl-7 pr-2.5" : "px-2.5"}`}
+        >
+          <Table className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+          <input
+            autoFocus
+            value={boardNameInput}
+            onChange={(e) => setBoardNameInput(e.target.value)}
+            onBlur={() => handleRenameBoardSave(b.id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleRenameBoardSave(b.id);
+              if (e.key === "Escape") setEditingBoardId(null);
+            }}
+            className="flex-1 min-w-0 bg-transparent border-b border-indigo-500 text-white focus:outline-none"
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div
+        key={b.id}
+        draggable
+        onDragStart={() => setDraggingBoardId(b.id)}
+        onDragEnd={() => {
+          setDraggingBoardId(null);
+          setDragOverFolderId(null);
+          setIsDragOverUngrouped(false);
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setBoardMenuId(b.id);
+        }}
+        className={`group relative flex items-center justify-between rounded-lg text-xs transition-all cursor-grab active:cursor-grabbing ${
+          isActive
+            ? "bg-[#36384d] text-white font-medium shadow-xs"
+            : "text-zinc-300 hover:bg-[#232533] hover:text-white"
+        } ${draggingBoardId === b.id ? "opacity-40" : ""}`}
+      >
+        <Link
+          href={`/board/${b.id}`}
+          onClick={onItemClick}
+          draggable={false}
+          className={`flex items-center gap-2.5 min-w-0 flex-1 py-2 ${opts.indent ? "pl-7 pr-2.5" : "px-2.5"}`}
+        >
+          <Table
+            className={`h-3.5 w-3.5 shrink-0 transition-colors ${
+              isActive ? "text-blue-400" : "text-zinc-400 group-hover:text-zinc-200"
+            }`}
+          />
+          <span className="truncate">{b.name}</span>
+        </Link>
+
+        <div className="flex items-center gap-1 pr-2 shrink-0">
+          {taskCount > 0 && (
+            <span className="rounded-full bg-zinc-800 text-zinc-400 group-hover:text-zinc-200 px-1.5 py-0.2 text-[10px] font-bold">
+              {taskCount}
+            </span>
+          )}
+          <button
+            ref={(el) => {
+              boardMenuButtonRefs.current[b.id] = el;
+            }}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setBoardMenuId(boardMenuId === b.id ? null : b.id);
+            }}
+            title="Board options"
+            className="opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:text-white hover:bg-zinc-700 transition-all shrink-0 cursor-pointer"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <FloatingPanel
+          isOpen={boardMenuId === b.id}
+          onClose={() => setBoardMenuId(null)}
+          anchorRef={{ current: boardMenuButtonRefs.current[b.id] }}
+          align="right"
+          className="w-48 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-left"
+        >
+          <button
+            type="button"
+            onClick={() => handleRenameBoardStart(b.id, b.name)}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+          >
+            <Pencil className="h-3.5 w-3.5 text-blue-400" />
+            <span>Rename</span>
+          </button>
+          {b.folderId && (
+            <button
+              type="button"
+              onClick={() => {
+                setBoardMenuId(null);
+                updateBoard(b.id, { folderId: null });
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+            >
+              <FolderOpen className="h-3.5 w-3.5 text-amber-400" />
+              <span>Remove from folder</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => handleDeleteBoard(b.id, b.name)}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-rose-400 hover:bg-rose-500/10 transition-colors text-left cursor-pointer"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span>Delete</span>
+          </button>
+        </FloatingPanel>
+      </div>
+    );
+  };
+
+  const renderFolderRow = (f: (typeof folders)[number]) => {
+    const folderBoards = boards.filter((b) => b.folderId === f.id);
+    const isDropTarget = dragOverFolderId === f.id;
+
+    if (editingFolderId === f.id) {
+      return (
+        <div key={f.id} className="space-y-0.5">
+          <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs bg-[#232533]">
+            <Folder className={`h-3.5 w-3.5 shrink-0 ${f.color}`} />
+            <input
+              autoFocus
+              value={folderNameInput}
+              onChange={(e) => setFolderNameInput(e.target.value)}
+              onBlur={() => handleRenameFolderSave(f.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleRenameFolderSave(f.id);
+                if (e.key === "Escape") setEditingFolderId(null);
+              }}
+              className="flex-1 min-w-0 bg-transparent border-b border-indigo-500 text-white focus:outline-none"
+            />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div key={f.id} className="space-y-0.5">
+        <div
+          onDragOver={(e) => {
+            // Must preventDefault on every event to allow dropping here at
+            // all — but that's all this handler does; the highlight state
+            // itself is set once on enter/leave below, not on every tick,
+            // since dragover fires continuously while hovering.
+            if (draggingBoardId) e.preventDefault();
+          }}
+          onDragEnter={(e) => {
+            if (draggingBoardId) {
+              e.preventDefault();
+              setDragOverFolderId(f.id);
+            }
+          }}
+          onDragLeave={() => setDragOverFolderId((cur) => (cur === f.id ? null : cur))}
+          onDrop={(e) => {
+            e.preventDefault();
+            handleDropOnFolder(f.id);
+          }}
+          className={`group relative flex items-center justify-between rounded-lg pr-1 text-xs transition-all ${
+            isDropTarget
+              ? "bg-indigo-600/20 ring-1 ring-indigo-500"
+              : "text-zinc-300 hover:bg-[#232533] hover:text-white"
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => toggleFolderCollapse(f.id)}
+            className="flex items-center gap-1.5 min-w-0 flex-1 px-1.5 py-2 cursor-pointer text-left"
+          >
+            {f.isCollapsed ? (
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+            )}
+            <Folder className={`h-3.5 w-3.5 shrink-0 ${f.color}`} />
+            <span className="truncate font-medium">{f.name}</span>
+            {folderBoards.length > 0 && (
+              <span className="text-[10px] text-zinc-500 shrink-0">{folderBoards.length}</span>
+            )}
+          </button>
+
+          <button
+            ref={(el) => {
+              folderMenuButtonRefs.current[f.id] = el;
+            }}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setFolderMenuId(folderMenuId === f.id ? null : f.id);
+            }}
+            title="Folder options"
+            className="opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:text-white hover:bg-zinc-700 transition-all shrink-0 cursor-pointer"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
+
+          <FloatingPanel
+            isOpen={folderMenuId === f.id}
+            onClose={() => setFolderMenuId(null)}
+            anchorRef={{ current: folderMenuButtonRefs.current[f.id] }}
+            align="right"
+            className="w-48 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-left"
+          >
+            <button
+              type="button"
+              onClick={() => handleRenameFolderStart(f.id, f.name)}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+            >
+              <Pencil className="h-3.5 w-3.5 text-blue-400" />
+              <span>Rename</span>
+            </button>
+
+            <div className="px-2.5 py-1.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1.5">
+                Color
+              </div>
+              <div className="flex items-center gap-1.5">
+                {FOLDER_COLORS.map((c) => (
+                  <button
+                    key={c.class}
+                    type="button"
+                    title={c.name}
+                    onClick={() => {
+                      updateFolder(f.id, { color: c.class });
+                      setFolderMenuId(null);
+                    }}
+                    className={`h-5 w-5 rounded-full flex items-center justify-center border transition-colors cursor-pointer ${
+                      f.color === c.class ? "border-white" : "border-transparent hover:border-zinc-600"
+                    }`}
+                  >
+                    <Folder className={`h-3.5 w-3.5 ${c.class}`} />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="my-1 border-t border-zinc-800" />
+
+            <button
+              type="button"
+              onClick={() => handleNewBoardInFolder(f.id)}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+            >
+              <Plus className="h-3.5 w-3.5 text-emerald-400" />
+              <span>New board</span>
+            </button>
+
+            {folderBoards.length > 0 && (
+              <button
+                type="button"
+                onClick={() => handleEmptyFolder(f.id, f.name)}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+              >
+                <FolderOpen className="h-3.5 w-3.5 text-amber-400" />
+                <span>Move all boards out</span>
+              </button>
+            )}
+
+            <div className="my-1 border-t border-zinc-800" />
+
+            <button
+              type="button"
+              onClick={() => handleDeleteFolder(f.id, f.name)}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-rose-400 hover:bg-rose-500/10 transition-colors text-left cursor-pointer"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Delete folder</span>
+            </button>
+          </FloatingPanel>
+        </div>
+
+        {!f.isCollapsed && folderBoards.length > 0 && (
+          <div className="space-y-0.5">
+            {folderBoards.map((b) => renderBoardRow(b, { indent: true }))}
+          </div>
+        )}
+        {!f.isCollapsed && folderBoards.length === 0 && (
+          <p className="pl-7 pr-2.5 py-1 text-[11px] text-zinc-500 italic">
+            Drag a board here
+          </p>
+        )}
+      </div>
+    );
+  };
 
   const myTasksCount = getMyTasks().length;
   const requestsCount = tasks.filter(
@@ -721,10 +1128,15 @@ export function Sidebar({
         {/* 4. Projects / Boards Section */}
         <div className="space-y-2 pt-1">
           {(() => {
+            const activeWorkspaceFolders = folders.filter(
+              (f) => f.workspaceId === workspace.id
+            );
             const activeWorkspaceBoards = boards.filter(
               (b) => !b.workspaceId || b.workspaceId === workspace.id
             );
-            return activeWorkspaceBoards.length === 0 ? (
+            const ungroupedBoards = activeWorkspaceBoards.filter((b) => !b.folderId);
+
+            return activeWorkspaceFolders.length === 0 && activeWorkspaceBoards.length === 0 ? (
               <div className="p-3 text-center rounded-xl border border-dashed border-zinc-700/60 bg-zinc-900/40 space-y-2">
                 <p className="text-xs text-zinc-300 font-medium">No projects yet</p>
                 <p className="text-[11px] text-zinc-500 leading-relaxed">
@@ -750,42 +1162,34 @@ export function Sidebar({
                 </div>
               </div>
             ) : (
-              <div className="space-y-0.5">
-                {activeWorkspaceBoards.map((b) => {
-                  const isActive = pathname === `/board/${b.id}`;
-                  const taskCount = tasks.filter(
-                    (t) => t.boardId === b.id && !t.isArchived
-                  ).length;
-                  return (
-                    <Link
-                      key={b.id}
-                      href={`/board/${b.id}`}
-                      onClick={onItemClick}
-                      className={`group flex items-center justify-between rounded-lg px-2.5 py-2 text-xs transition-all ${
-                        isActive
-                          ? "bg-[#36384d] text-white font-medium shadow-xs"
-                          : "text-zinc-300 hover:bg-[#232533] hover:text-white"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <Table
-                          className={`h-3.5 w-3.5 shrink-0 transition-colors ${
-                            isActive
-                              ? "text-blue-400"
-                              : "text-zinc-400 group-hover:text-zinc-200"
-                          }`}
-                        />
-                        <span className="truncate">{b.name}</span>
-                      </div>
+              <div className="space-y-2">
+                {activeWorkspaceFolders.length > 0 && (
+                  <div className="space-y-1">
+                    {activeWorkspaceFolders.map((f) => renderFolderRow(f))}
+                  </div>
+                )}
 
-                      {taskCount > 0 && (
-                        <span className="rounded-full bg-zinc-800 text-zinc-400 group-hover:text-zinc-200 px-1.5 py-0.2 text-[10px] font-bold shrink-0">
-                          {taskCount}
-                        </span>
-                      )}
-                    </Link>
-                  );
-                })}
+                <div
+                  onDragOver={(e) => {
+                    if (draggingBoardId) e.preventDefault();
+                  }}
+                  onDragEnter={(e) => {
+                    if (draggingBoardId) {
+                      e.preventDefault();
+                      setIsDragOverUngrouped(true);
+                    }
+                  }}
+                  onDragLeave={() => setIsDragOverUngrouped(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    handleDropOnUngrouped();
+                  }}
+                  className={`space-y-0.5 rounded-lg transition-colors ${
+                    isDragOverUngrouped ? "bg-indigo-600/10 ring-1 ring-indigo-500/50" : ""
+                  }`}
+                >
+                  {ungroupedBoards.map((b) => renderBoardRow(b))}
+                </div>
               </div>
             );
           })()}

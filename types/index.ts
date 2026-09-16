@@ -66,6 +66,18 @@ export interface Board {
   lastViewedAt?: Date;
 }
 
+// ─── Folders (organize boards within a workspace) ──────────────────────────
+
+export interface Folder {
+  id: ID;
+  workspaceId: ID;
+  name: string;
+  color: string; // Tailwind text color class e.g. "text-amber-400"
+  isCollapsed: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface BoardInvitation {
   id: ID;
   token: string;
@@ -265,6 +277,19 @@ export interface Post {
   likeCount: number;
   dislikeCount: number;
   myReaction: "like" | "dislike" | null;
+}
+
+// ─── Workspace Files (document library — PDF, Word, Excel, 3D models, etc.) ───
+
+export interface WorkspaceFile {
+  id: ID;
+  workspaceId: ID;
+  name: string;
+  mimeType: string;
+  size: number;
+  dataUrl: string;
+  uploadedById: ID;
+  createdAt: Date;
 }
 
 // ─── Status & Priority Configurations (Universal Monday Style) ────────────────

@@ -21,6 +21,7 @@ import type {
   Activity,
   Notification,
   PersonalTodo,
+  Folder,
   TaskStatus,
   TaskPriority,
 } from "@/types";
@@ -208,8 +209,20 @@ interface WorkBoardContextType {
     privacy?: BoardPrivacy;
     itemLabel?: string;
   }) => Promise<Board>;
-  folders: Array<{ id: string; name: string; color?: string }>;
-  createFolder: (name: string, color?: string) => { id: string; name: string; color?: string };
+  updateBoard: (
+    boardId: string,
+    updates: Partial<Pick<Board, "name" | "description" | "color">> & { folderId?: string | null }
+  ) => void;
+  deleteBoard: (boardId: string) => void;
+  folders: Folder[];
+  createFolder: (name: string, color?: string) => Promise<Folder>;
+  updateFolder: (
+    folderId: string,
+    updates: Partial<Pick<Folder, "name" | "color">>
+  ) => void;
+  toggleFolderCollapse: (folderId: string) => void;
+  emptyFolder: (folderId: string) => void;
+  deleteFolder: (folderId: string) => void;
 
   // Board Specific Invitation Modal
   isInviteBoardModalOpen: boolean;
@@ -302,8 +315,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const [isCreateBoardOpen, setIsCreateBoardOpen] = useState(false);
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const [isCreateDashboardOpen, setIsCreateDashboardOpen] = useState(false);
-  const [folders, setFolders] = useState<Array<{ id: string; name: string; color?: string }>>([
-  ]);
+  const [folders, setFolders] = useState<Folder[]>([]);
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   // True once BOTH the localStorage-restore effect and the database fetch
@@ -329,7 +341,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         // known — see the per-user effect below. Fetching them here
         // unconditionally used to return every workspace in the database,
         // including ones this user was never invited to.
-        const [boardsRes, groupsRes, tasksRes, commentsRes, subtasksRes, activitiesRes] =
+        const [boardsRes, groupsRes, tasksRes, commentsRes, subtasksRes, activitiesRes, foldersRes] =
           await Promise.all([
             fetch("/api/boards").then((r) => r.json()).catch(() => null),
             fetch("/api/groups").then((r) => r.json()).catch(() => null),
@@ -337,6 +349,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
             fetch("/api/comments").then((r) => r.json()).catch(() => null),
             fetch("/api/subtasks").then((r) => r.json()).catch(() => null),
             fetch("/api/activities").then((r) => r.json()).catch(() => null),
+            fetch("/api/folders").then((r) => r.json()).catch(() => null),
           ]);
 
         if (cancelled) return;
@@ -347,6 +360,16 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
         if (groupsRes?.success && Array.isArray(groupsRes.data)) {
           setGroups(groupsRes.data);
+        }
+
+        if (foldersRes?.success && Array.isArray(foldersRes.data)) {
+          setFolders(
+            foldersRes.data.map((f: Folder) => ({
+              ...f,
+              createdAt: new Date(f.createdAt),
+              updatedAt: new Date(f.updatedAt),
+            }))
+          );
         }
 
         if (tasksRes?.success && Array.isArray(tasksRes.data)) {
@@ -2001,8 +2024,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const deleteWorkspace = useCallback(
     async (workspaceId: string): Promise<boolean> => {
-      if (workspaces.length <= 1) return false;
-
+      // No "must keep at least one workspace" guard here anymore — that
+      // used to block on `workspaces.length <= 1`, but `workspaces` is now
+      // scoped to just this user's own memberships (see the per-user
+      // hydration effect), so anyone with only one workspace — the common
+      // case — could never delete it. Ending up with zero is fine; it's
+      // the same state a freshly-registered, not-yet-invited user is in.
       const res = await fetch(`/api/workspaces/${workspaceId}`, { method: "DELETE" });
       const result = await res.json();
       if (!result?.success) {
@@ -2012,11 +2039,19 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       const updatedList = workspaces.filter((w) => w.id !== workspaceId);
       setWorkspaces(updatedList);
       const newActive = updatedList[0];
-      setWorkspace(newActive);
-      try {
-        localStorage.setItem(ACTIVE_WORKSPACE_KEY, newActive.id);
-      } catch {
-        // ignore — localStorage unavailable
+      if (newActive) {
+        setWorkspace(newActive);
+        try {
+          localStorage.setItem(ACTIVE_WORKSPACE_KEY, newActive.id);
+        } catch {
+          // ignore — localStorage unavailable
+        }
+      } else {
+        try {
+          localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+        } catch {
+          // ignore — localStorage unavailable
+        }
       }
       return true;
     },
@@ -2042,14 +2077,80 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const createFolder = useCallback((name: string, color?: string) => {
-    const newFolder = {
-      id: `folder-${Date.now()}`,
-      name,
-      color: color || "text-zinc-400",
-    };
-    setFolders((prev) => [...prev, newFolder]);
-    return newFolder;
+  const createFolder = useCallback(
+    async (name: string, color?: string): Promise<Folder> => {
+      const res = await fetch("/api/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: workspace.id, name, color }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) {
+        throw new Error(result?.error || "Failed to create folder");
+      }
+      const newFolder: Folder = {
+        ...result.data,
+        createdAt: new Date(result.data.createdAt),
+        updatedAt: new Date(result.data.updatedAt),
+      };
+      setFolders((prev) => [...prev, newFolder]);
+      return newFolder;
+    },
+    [workspace.id]
+  );
+
+  const updateFolder = useCallback(
+    (folderId: string, updates: Partial<Pick<Folder, "name" | "color">>) => {
+      setFolders((prev) =>
+        prev.map((f) => (f.id === folderId ? { ...f, ...updates, updatedAt: new Date() } : f))
+      );
+      fetch(`/api/folders/${folderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      }).catch((err) => console.error("Failed to update folder:", err));
+    },
+    []
+  );
+
+  const toggleFolderCollapse = useCallback(
+    (folderId: string) => {
+      const folder = folders.find((f) => f.id === folderId);
+      const nextCollapsed = !(folder?.isCollapsed ?? false);
+      setFolders((prev) =>
+        prev.map((f) => (f.id === folderId ? { ...f, isCollapsed: nextCollapsed } : f))
+      );
+      fetch(`/api/folders/${folderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isCollapsed: nextCollapsed }),
+      }).catch((err) => console.error("Failed to toggle folder collapse:", err));
+    },
+    [folders]
+  );
+
+  const emptyFolder = useCallback(
+    (folderId: string) => {
+      setBoards((prev) =>
+        prev.map((b) => (b.folderId === folderId ? { ...b, folderId: undefined } : b))
+      );
+      fetch(`/api/folders/${folderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "empty" }),
+      }).catch((err) => console.error("Failed to empty folder:", err));
+    },
+    []
+  );
+
+  const deleteFolder = useCallback((folderId: string) => {
+    setFolders((prev) => prev.filter((f) => f.id !== folderId));
+    setBoards((prev) =>
+      prev.map((b) => (b.folderId === folderId ? { ...b, folderId: undefined } : b))
+    );
+    fetch(`/api/folders/${folderId}`, { method: "DELETE" }).catch((err) =>
+      console.error("Failed to delete folder:", err)
+    );
   }, []);
 
   const createBoard = useCallback(
@@ -2148,8 +2249,20 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         ...createdBoard,
         workspaceId: workspace.id,
         privacy: data.privacy || "main",
+        folderId: data.folderId,
         groupIds: newGroups.map((g) => g.id),
       };
+
+      // The initial POST /api/boards doesn't carry folderId (that endpoint
+      // is shared with the plain "new board" flow) — patch it in right
+      // after if this board was created from inside a folder's menu.
+      if (data.folderId) {
+        fetch(`/api/boards/${newBoard.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ folderId: data.folderId }),
+        }).catch((err) => console.error("Failed to set board folder:", err));
+      }
 
       const updatedBoards = [...boards.filter((b) => b.id !== newBoard.id), newBoard];
       const updatedGroups = [...groups.filter((g) => g.boardId !== newBoard.id), ...newGroups];
@@ -2178,6 +2291,44 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     },
     [currentUser, workspace, boards, groups, users, tasks, activities, notifications, persistState]
   );
+
+  const updateBoard = useCallback(
+    (
+      boardId: string,
+      updates: Partial<Pick<Board, "name" | "description" | "color">> & {
+        folderId?: string | null;
+      }
+    ) => {
+      setBoards((prev) =>
+        prev.map((b) =>
+          b.id === boardId
+            ? {
+                ...b,
+                ...updates,
+                folderId:
+                  updates.folderId === undefined ? b.folderId : updates.folderId || undefined,
+                updatedAt: new Date(),
+              }
+            : b
+        )
+      );
+      // JSON.stringify drops `undefined` keys but keeps `null` — pass
+      // folderId: null (not undefined) to actually clear it server-side.
+      fetch(`/api/boards/${boardId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      }).catch((err) => console.error("Failed to update board:", err));
+    },
+    []
+  );
+
+  const deleteBoard = useCallback((boardId: string) => {
+    setBoards((prev) => prev.filter((b) => b.id !== boardId));
+    fetch(`/api/boards/${boardId}`, { method: "DELETE" }).catch((err) =>
+      console.error("Failed to delete board:", err)
+    );
+  }, []);
 
   const getTasksByAssignee = useCallback(
     (userId: string) =>
@@ -2346,8 +2497,14 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       openCreateDashboardModal,
       closeCreateDashboardModal,
       createBoard,
+      updateBoard,
+      deleteBoard,
       folders,
       createFolder,
+      updateFolder,
+      toggleFolderCollapse,
+      emptyFolder,
+      deleteFolder,
 
       isInviteBoardModalOpen,
       inviteBoardId,
@@ -2405,8 +2562,14 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       openCreateDashboardModal,
       closeCreateDashboardModal,
       createBoard,
+      updateBoard,
+      deleteBoard,
       folders,
       createFolder,
+      updateFolder,
+      toggleFolderCollapse,
+      emptyFolder,
+      deleteFolder,
       isInviteBoardModalOpen,
       inviteBoardId,
       openInviteBoardModal,

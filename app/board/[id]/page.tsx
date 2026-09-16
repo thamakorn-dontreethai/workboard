@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
@@ -38,10 +38,27 @@ export default function BoardPage() {
     openCreateTaskModal,
     openInviteBoardModal,
     addGroup,
+    updateBoard,
   } = useWorkBoard();
 
   const board = boards.find((b) => b.id === boardId) || boards[0];
   const [boardTitle, setBoardTitle] = useState(board ? board.name : "New Board");
+
+  // Keep the input in sync if the board changes underneath it (switching
+  // boards, or a rename made elsewhere e.g. the sidebar's rename menu).
+  useEffect(() => {
+    if (board) setBoardTitle(board.name);
+  }, [board?.id, board?.name]);
+
+  const handleSaveBoardTitle = () => {
+    const trimmed = boardTitle.trim();
+    if (!board) return;
+    if (trimmed && trimmed !== board.name) {
+      updateBoard(board.id, { name: trimmed });
+    } else {
+      setBoardTitle(board.name);
+    }
+  };
   const [searchFilter, setSearchFilter] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("main-table");
@@ -94,6 +111,14 @@ export default function BoardPage() {
               type="text"
               value={boardTitle}
               onChange={(e) => setBoardTitle(e.target.value)}
+              onBlur={handleSaveBoardTitle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") {
+                  setBoardTitle(board.name);
+                  e.currentTarget.blur();
+                }
+              }}
               className="text-2xl font-bold text-white bg-transparent border-b border-transparent hover:border-zinc-700 focus:border-indigo-500 focus:outline-none py-0.5 tracking-tight transition-colors"
             />
             <ChevronDown className="h-4 w-4 text-zinc-400 cursor-pointer hover:text-white" />
@@ -171,30 +196,14 @@ export default function BoardPage() {
           <button
             type="button"
             onClick={() => setActiveTab("main-table")}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-t-lg font-semibold transition-colors border-b-2 ${
-              activeTab === "main-table"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-t-lg font-semibold transition-colors border-b-2 ${activeTab === "main-table"
                 ? "border-indigo-500 text-white bg-zinc-800/40"
                 : "border-transparent text-zinc-400 hover:text-zinc-200"
-            }`}
+              }`}
           >
             <span>Main table</span>
           </button>
 
-          <button
-            type="button"
-            title="View options"
-            className="p-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800/50"
-          >
-            <MoreHorizontal className="h-3.5 w-3.5" />
-          </button>
-
-          <button
-            type="button"
-            title="Add view"
-            className="p-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800/50"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
         </div>
       </div>
 
