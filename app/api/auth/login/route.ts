@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { readDb } from "@/lib/server/db";
 import { verifyPassword } from "@/lib/server/auth";
+import { setSessionCookie } from "@/lib/server/session";
 
 export async function POST(request: Request) {
   try {
@@ -41,11 +42,13 @@ export async function POST(request: Request) {
             );
           }
           const { password: _, ...safeUser } = user;
-          return NextResponse.json({
+          const response = NextResponse.json({
             success: true,
             message: "Login successful",
             data: safeUser,
           });
+          setSessionCookie(response, user.id);
+          return response;
         }
       } catch (e) {
         console.warn("Prisma login check fallback:", e);
@@ -82,11 +85,13 @@ export async function POST(request: Request) {
     }
 
     const { password: _, ...safeUser } = localUser;
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: "Login successful",
       data: safeUser,
     });
+    setSessionCookie(response, localUser.id);
+    return response;
   } catch (error: any) {
     return NextResponse.json(
       { success: false, error: error.message || "Failed to login" },

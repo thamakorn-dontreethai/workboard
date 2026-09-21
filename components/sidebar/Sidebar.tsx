@@ -65,6 +65,8 @@ export function Sidebar({
     users,
     tasks,
     folders,
+    dashboards,
+    deleteDashboard,
     openCreateTaskModal,
     openCreateBoardModal,
     openCreateFolderModal,
@@ -72,6 +74,8 @@ export function Sidebar({
     openInviteMemberModal,
     updateBoard,
     deleteBoard,
+    canDo,
+    isWorkspaceLeader,
     createBoard,
     updateFolder,
     toggleFolderCollapse,
@@ -125,13 +129,13 @@ export function Sidebar({
   const [isDragOverUngrouped, setIsDragOverUngrouped] = useState(false);
 
   const handleDropOnFolder = (folderId: string) => {
-    if (draggingBoardId) updateBoard(draggingBoardId, { folderId });
+    if (draggingBoardId && canDo("manage", draggingBoardId)) updateBoard(draggingBoardId, { folderId });
     setDraggingBoardId(null);
     setDragOverFolderId(null);
   };
 
   const handleDropOnUngrouped = () => {
-    if (draggingBoardId) updateBoard(draggingBoardId, { folderId: null });
+    if (draggingBoardId && canDo("manage", draggingBoardId)) updateBoard(draggingBoardId, { folderId: null });
     setDraggingBoardId(null);
     setIsDragOverUngrouped(false);
   };
@@ -230,7 +234,7 @@ export function Sidebar({
         }}
         onContextMenu={(e) => {
           e.preventDefault();
-          setBoardMenuId(b.id);
+          if (canDo("manage", b.id)) setBoardMenuId(b.id);
         }}
         className={`group relative flex items-center justify-between rounded-lg text-xs transition-all cursor-grab active:cursor-grabbing ${
           isActive
@@ -269,7 +273,9 @@ export function Sidebar({
               setBoardMenuId(boardMenuId === b.id ? null : b.id);
             }}
             title="Board options"
-            className="opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:text-white hover:bg-zinc-700 transition-all shrink-0 cursor-pointer"
+            className={`opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:text-white hover:bg-zinc-700 transition-all shrink-0 cursor-pointer ${
+              canDo("manage", b.id) ? "" : "hidden"
+            }`}
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
@@ -395,7 +401,9 @@ export function Sidebar({
               setFolderMenuId(folderMenuId === f.id ? null : f.id);
             }}
             title="Folder options"
-            className="opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:text-white hover:bg-zinc-700 transition-all shrink-0 cursor-pointer"
+            className={`opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:text-white hover:bg-zinc-700 transition-all shrink-0 cursor-pointer ${
+              isWorkspaceLeader ? "" : "hidden"
+            }`}
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
@@ -1066,64 +1074,152 @@ export function Sidebar({
               {/* [+] Menu popup */}
               {isPlusMenuOpen && (
                 <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-xs animate-in fade-in zoom-in-95">
-                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                    Add to Workspace
-                  </div>
+                  {!workspace.id ? (
+                    // No real workspace to add any of this to yet — every
+                    // option below assumes one exists, so offer to create
+                    // one instead of letting these silently fail/attach to
+                    // nothing.
+                    <div className="p-2 space-y-2">
+                      <p className="text-[11px] text-zinc-400 leading-relaxed px-0.5">
+                        You don't have a workspace yet. Create one first.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsPlusMenuOpen(false);
+                          openCreateWorkspaceModal();
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Create Workspace</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                        Add to Workspace
+                      </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsPlusMenuOpen(false);
-                      openCreateBoardModal();
-                    }}
-                    className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
-                  >
-                    <Table className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                    <span>New Board / Project</span>
-                  </button>
+                      {isWorkspaceLeader && (
+<button
+                        type="button"
+                        onClick={() => {
+                          setIsPlusMenuOpen(false);
+                          openCreateBoardModal();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                      >
+                        <Table className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                        <span>New Board / Project</span>
+                      </button>
+)}
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsPlusMenuOpen(false);
-                      openCreateFolderModal();
-                    }}
-                    className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
-                  >
-                    <FolderPlus className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                    <span>New Folder</span>
-                  </button>
+                      {isWorkspaceLeader && (
+<button
+                        type="button"
+                        onClick={() => {
+                          setIsPlusMenuOpen(false);
+                          openCreateFolderModal();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                      >
+                        <FolderPlus className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                        <span>New Folder</span>
+                      </button>
+)}
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsPlusMenuOpen(false);
-                      openInviteMemberModal();
-                    }}
-                    className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
-                  >
-                    <Users className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                    <span>Add Team / Member</span>
-                  </button>
+                      {isWorkspaceLeader && (
+<button
+                        type="button"
+                        onClick={() => {
+                          setIsPlusMenuOpen(false);
+                          openInviteMemberModal();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                      >
+                        <Users className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                        <span>Add Team / Member</span>
+                      </button>
+)}
 
-                  <div className="my-1 border-t border-zinc-700/60" />
+                      <div className="my-1 border-t border-zinc-700/60" />
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsPlusMenuOpen(false);
-                      openCreateDashboardModal();
-                    }}
-                    className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
-                  >
-                    <BarChart3 className="h-3.5 w-3.5 text-purple-400 shrink-0" />
-                    <span>New Dashboard View</span>
-                  </button>
+                      {isWorkspaceLeader && (
+<button
+                        type="button"
+                        onClick={() => {
+                          setIsPlusMenuOpen(false);
+                          openCreateDashboardModal();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                      >
+                        <BarChart3 className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                        <span>New Dashboard View</span>
+                      </button>
+)}
+                    </>
+                  )}
                 </div>
               )}
             </div>
           </div>
         </div>
+
+        {/* 3.5 Dashboards Section — only shown once at least one exists,
+            since "+ New Dashboard View" in the Add menu already covers the
+            empty case */}
+        {(() => {
+          const activeWorkspaceDashboards = dashboards.filter(
+            (d) => d.workspaceId === workspace.id
+          );
+          if (activeWorkspaceDashboards.length === 0) return null;
+
+          return (
+            <div className="space-y-1 pt-1">
+              <div className="px-1">
+                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                  Dashboards
+                </span>
+              </div>
+              {activeWorkspaceDashboards.map((d) => {
+                const isActive = pathname === `/workspace/${workspace.id}/dashboard/${d.id}`;
+                return (
+                  <div
+                    key={d.id}
+                    className={`group flex items-center gap-1 rounded-lg pr-1 transition-colors ${
+                      isActive ? "bg-zinc-800 text-white" : "hover:bg-zinc-800/60"
+                    }`}
+                  >
+                    <Link
+                      href={`/workspace/${workspace.id}/dashboard/${d.id}`}
+                      draggable={false}
+                      onClick={onItemClick}
+                      className={`flex items-center gap-2 flex-1 min-w-0 px-2 py-1.5 text-xs ${
+                        isActive ? "text-white" : "text-zinc-300 hover:text-white"
+                      }`}
+                    >
+                      <BarChart3 className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                      <span className="truncate">{d.name}</span>
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (confirm(`Delete dashboard "${d.name}"?`)) deleteDashboard(d.id);
+                      }}
+                      title="Delete dashboard"
+                      className="opacity-0 group-hover:opacity-100 shrink-0 flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {/* 4. Projects / Boards Section */}
         <div className="space-y-2 pt-1">
@@ -1138,28 +1234,53 @@ export function Sidebar({
 
             return activeWorkspaceFolders.length === 0 && activeWorkspaceBoards.length === 0 ? (
               <div className="p-3 text-center rounded-xl border border-dashed border-zinc-700/60 bg-zinc-900/40 space-y-2">
-                <p className="text-xs text-zinc-300 font-medium">No projects yet</p>
-                <p className="text-[11px] text-zinc-500 leading-relaxed">
-                  Create a project in {workspace.name} to get started.
-                </p>
-                <div className="pt-1 flex flex-col gap-1.5">
-                  <button
-                    type="button"
-                    onClick={openCreateBoardModal}
-                    className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs transition-colors"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    <span>Create First Project</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={openInviteMemberModal}
-                    className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 hover:text-white text-xs font-medium transition-colors"
-                  >
-                    <Users className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>Invite Members</span>
-                  </button>
-                </div>
+                {!workspace.id ? (
+                  <>
+                    <p className="text-xs text-zinc-300 font-medium">No workspace yet</p>
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                      Create your own workspace, or ask to be invited to one.
+                    </p>
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={openCreateWorkspaceModal}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs transition-colors"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Create Workspace</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-zinc-300 font-medium">No projects yet</p>
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                      Create a project in {workspace.name} to get started.
+                    </p>
+                    <div className="pt-1 flex flex-col gap-1.5">
+                      {isWorkspaceLeader && (
+<button
+                        type="button"
+                        onClick={openCreateBoardModal}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs transition-colors"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Create First Project</span>
+                      </button>
+)}
+                      {isWorkspaceLeader && (
+<button
+                        type="button"
+                        onClick={openInviteMemberModal}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 hover:text-white text-xs font-medium transition-colors"
+                      >
+                        <Users className="h-3.5 w-3.5 text-emerald-400" />
+                        <span>Invite Members</span>
+                      </button>
+)}
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
               <div className="space-y-2">
@@ -1194,26 +1315,6 @@ export function Sidebar({
             );
           })()}
         </div>
-      </div>
-
-      {/* Footer / Team Quick Access */}
-      <div className="p-3 border-t border-[#262836] bg-[#161720]">
-        <Link
-          href="/team"
-          onClick={onItemClick}
-          className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${pathname === "/team"
-              ? "bg-[#36384d] text-white font-semibold"
-              : "text-zinc-400 hover:bg-[#232533] hover:text-white"
-            }`}
-        >
-          <div className="flex items-center gap-2">
-            <Users className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-            <span>Team & Workload</span>
-          </div>
-          <span className="text-[10px] text-zinc-500 font-mono">
-            {users.length} members
-          </span>
-        </Link>
       </div>
     </aside>
   );

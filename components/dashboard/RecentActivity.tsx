@@ -7,9 +7,18 @@ import { Activity as ActivityIcon } from "lucide-react";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 
 export function RecentActivity() {
-  const { activities, users, boards, tasks, openTaskModal } = useWorkBoard();
+  const { activities, users, boards, tasks, workspace, openTaskModal } = useWorkBoard();
 
-  const recentList = activities.slice(0, 8);
+  // `activities` is hydrated globally, not scoped server-side — cross
+  // check each one's board against the active workspace, otherwise this
+  // leaks other workspaces' activity (who did what, on which item) to
+  // anyone viewing the dashboard.
+  const workspaceBoardIds = new Set(
+    boards.filter((b) => b.workspaceId === workspace.id).map((b) => b.id)
+  );
+  const recentList = activities
+    .filter((a) => a.boardId && workspaceBoardIds.has(a.boardId))
+    .slice(0, 8);
 
   return (
     <div className="rounded-xl border border-border bg-card">

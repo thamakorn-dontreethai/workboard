@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createBoardInvitation, getBoardById, getUsers, getBoards, createBoard } from "@/lib/server/db";
 import { sendBoardInvitationEmail } from "@/lib/server/email";
+import { authorizeBoard } from "@/lib/server/permissions";
 
 export async function POST(
   request: Request,
@@ -8,6 +9,10 @@ export async function POST(
 ) {
   try {
     const { id: boardId } = await params;
+    const auth = await authorizeBoard(request, boardId, "manage");
+    if (!auth.ok) return auth.response;
+    const invitedById = auth.userId;
+
     const body = await request.json();
 
     if (!body.email) {
@@ -26,7 +31,7 @@ export async function POST(
         board = await createBoard({
           name: "Projects & Deliverables",
           description: "Main team project board",
-          ownerId: body.invitedById,
+          ownerId: invitedById,
         });
       }
     }
@@ -40,14 +45,14 @@ export async function POST(
 
     const allUsers = await getUsers();
     const inviter = allUsers.find(
-      (u) => u.id === (body.invitedById || board!.ownerId)
+      (u) => u.id === (invitedById || board!.ownerId)
     );
 
     const invitation = await createBoardInvitation({
       boardId,
       email: body.email,
       role: body.role || "Member",
-      invitedById: body.invitedById || board.ownerId,
+      invitedById: invitedById || board.ownerId,
     });
 
     const origin = request.headers.get("origin") || "http://localhost:3000";

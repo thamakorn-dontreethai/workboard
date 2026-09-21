@@ -223,7 +223,7 @@ export function getRecentActivities(limit = 10): Activity[] {
 
 export function getMyTasks(userId: string): Task[] {
   return MOCK_TASKS.filter(
-    (t) => t.assigneeId === userId && !t.isArchived && t.status !== "done" && t.status !== "cancelled"
+    (t) => t.assigneeIds.includes(userId) && !t.isArchived && t.status !== "done" && t.status !== "cancelled"
   );
 }
 
@@ -233,7 +233,7 @@ export function getDueSoonTasks(userId: string, withinDays = 7): Task[] {
   cutoff.setDate(cutoff.getDate() + withinDays);
   return MOCK_TASKS.filter(
     (t) =>
-      t.assigneeId === userId &&
+      t.assigneeIds.includes(userId) &&
       !t.isArchived &&
       t.status !== "done" &&
       t.status !== "cancelled" &&
@@ -264,7 +264,7 @@ export function getBoardStats(boardId: string) {
 
 export function getWorkspaceStats(userId: string) {
   const myTasks = MOCK_TASKS.filter(
-    (t) => t.assigneeId === userId && !t.isArchived
+    (t) => t.assigneeIds.includes(userId) && !t.isArchived
   );
   return {
     totalAssigned: myTasks.length,

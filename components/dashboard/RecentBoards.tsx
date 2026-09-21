@@ -6,9 +6,10 @@ import { type Board } from "@/types";
 import { formatRelativeDate } from "@/lib/utils/date";
 import { LayoutGrid, ArrowRight } from "lucide-react";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
+import { getBoardMemberIds } from "@/lib/utils/boardMembers";
 
 function BoardCard({ board }: { board: Board }) {
-  const { tasks, users } = useWorkBoard();
+  const { tasks, users, workspaces } = useWorkBoard();
 
   const boardTasks = tasks.filter((t) => t.boardId === board.id && !t.isArchived);
   const total = boardTasks.length;
@@ -22,7 +23,8 @@ function BoardCard({ board }: { board: Board }) {
       t.status !== "cancelled"
   ).length;
 
-  const members = users.filter((u) => board.memberIds.includes(u.id));
+  const memberIds = getBoardMemberIds(board, workspaces);
+  const members = users.filter((u) => memberIds.includes(u.id));
   const completionPct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   return (
@@ -106,7 +108,12 @@ function BoardCard({ board }: { board: Board }) {
 }
 
 export function RecentBoards() {
-  const { boards } = useWorkBoard();
+  const { boards, workspace } = useWorkBoard();
+  // `boards` is hydrated globally (not scoped server-side), so this must
+  // filter to the active workspace itself — otherwise every user sees
+  // every workspace's boards here, including ones they were never invited
+  // to.
+  const workspaceBoards = boards.filter((b) => b.workspaceId === workspace.id);
 
   return (
     <div className="rounded-xl border border-border bg-card">
@@ -116,18 +123,18 @@ export function RecentBoards() {
           <h2 className="text-sm font-semibold text-foreground">Project Boards</h2>
         </div>
         <span className="text-xs text-muted-foreground">
-          {boards.length} boards
+          {workspaceBoards.length} boards
         </span>
       </div>
 
       <div className="p-4">
-        {boards.length === 0 ? (
+        {workspaceBoards.length === 0 ? (
           <div className="py-8 text-center">
             <p className="text-sm text-muted-foreground">No boards yet.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            {boards.slice(0, 6).map((board) => (
+            {workspaceBoards.slice(0, 6).map((board) => (
               <BoardCard key={board.id} board={board} />
             ))}
           </div>

@@ -49,7 +49,7 @@ export default function MyWorkPage() {
     if (taskId) openTaskModal(taskId);
   }, [searchParams, openTaskModal]);
 
-  const myTasks = tasks.filter((t) => t.assigneeId === currentUser.id && !t.isArchived);
+  const myTasks = tasks.filter((t) => t.assigneeIds.includes(currentUser.id) && !t.isArchived);
 
   const filteredTasks = myTasks.filter((t) => {
     if (filter === "in_progress") return t.status === "in_progress";
@@ -191,15 +191,6 @@ export default function MyWorkPage() {
             {currentUser.role}).
           </p>
         </div>
-
-        <button
-          type="button"
-          onClick={() => openCreateTaskModal()}
-          className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-2xs self-start sm:self-center"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span>New Task</span>
-        </button>
       </div>
 
       {/* Filter Tabs */}

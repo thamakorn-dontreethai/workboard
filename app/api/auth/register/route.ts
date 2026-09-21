@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { readDb, writeDb } from "@/lib/server/db";
 import { hashPassword } from "@/lib/server/auth";
+import { setSessionCookie } from "@/lib/server/session";
 import type { User } from "@/types";
 
 const AVATAR_COLORS = [
@@ -117,7 +118,7 @@ export async function POST(request: Request) {
     // Return sanitized user (without password)
     const { password: _, ...safeUser } = newUser;
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         success: true,
         message: "Account created successfully",
@@ -125,6 +126,8 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
+    setSessionCookie(response, newUser.id);
+    return response;
   } catch (error: any) {
     return NextResponse.json(
       { success: false, error: error.message || "Failed to register" },

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getBoardById, updateBoard, deleteBoard } from "@/lib/server/db";
+import { authorizeBoard } from "@/lib/server/permissions";
 
 export async function GET(
   request: Request,
@@ -30,6 +31,9 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
+    const auth = await authorizeBoard(request, id, "manage");
+    if (!auth.ok) return auth.response;
+
     const updated = await updateBoard(id, body);
     if (!updated) {
       return NextResponse.json(
@@ -52,6 +56,9 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    const auth = await authorizeBoard(request, id, "manage");
+    if (!auth.ok) return auth.response;
+
     const deleted = await deleteBoard(id);
     if (!deleted) {
       return NextResponse.json(

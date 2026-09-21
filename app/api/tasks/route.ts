@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getTasks, createTask } from "@/lib/server/db";
+import { authorizeBoard } from "@/lib/server/permissions";
 
 export async function GET(request: Request) {
   try {
@@ -29,17 +30,24 @@ export async function POST(request: Request) {
       );
     }
 
+    const auth = await authorizeBoard(request, body.boardId, "manage");
+    if (!auth.ok) return auth.response;
+
     const newTask = await createTask({
       title: body.title,
       description: body.description,
       boardId: body.boardId,
       groupId: body.groupId,
-      assigneeId: body.assigneeId,
+      assigneeIds: Array.isArray(body.assigneeIds)
+        ? body.assigneeIds
+        : body.assigneeId
+          ? [body.assigneeId]
+          : undefined,
       priority: body.priority,
       status: body.status,
       dueDate: body.dueDate ? new Date(body.dueDate) : null,
       category: body.category,
-      reporterId: body.reporterId,
+      reporterId: auth.userId,
     });
 
     return NextResponse.json({ success: true, data: newTask }, { status: 201 });

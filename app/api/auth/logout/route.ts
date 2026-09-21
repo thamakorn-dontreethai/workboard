@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { clearSessionCookie } from "@/lib/server/session";
 
 export async function POST() {
-  return NextResponse.json({
+  const response = NextResponse.json({
     success: true,
     message: "Logged out successfully",
   });
+  clearSessionCookie(response);
+  return response;
 }

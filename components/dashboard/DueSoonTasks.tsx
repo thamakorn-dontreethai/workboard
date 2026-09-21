@@ -16,7 +16,7 @@ export function DueSoonTasks() {
   const dueSoonTasks = tasks
     .filter(
       (t) =>
-        t.assigneeId === currentUser.id &&
+        t.assigneeIds.includes(currentUser.id) &&
         !t.isArchived &&
         t.status !== "done" &&
         t.status !== "cancelled" &&

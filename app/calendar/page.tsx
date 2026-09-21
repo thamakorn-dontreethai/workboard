@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
@@ -11,6 +11,7 @@ import {
   TaskStatus,
   TaskPriority,
   PersonalTodo,
+  WorkspaceAppointment,
 } from "@/types";
 import { formatDate, isOverdue } from "@/lib/utils/date";
 import { getThaiHolidayForDate, ThaiHoliday } from "@/lib/utils/thaiHolidays";
@@ -92,7 +93,9 @@ export default function CalendarPage() {
     tasks,
     boards,
     users,
+    workspace,
     workspaces,
+    currentUser,
     personalTodos,
     createPersonalTodo,
     toggleTodoComplete,
@@ -101,6 +104,7 @@ export default function CalendarPage() {
     updateTaskDueDate,
     openTaskModal,
     openCreateTaskModal,
+    canDo,
   } = useWorkBoard();
 
   // Calendar State
@@ -114,8 +118,11 @@ export default function CalendarPage() {
   const [newTodoTime, setNewTodoTime] = useState<string>("09:00");
   const [newTodoReminderMinutes, setNewTodoReminderMinutes] = useState<number>(10);
 
-  // Filters (Defaults to "all" so all tasks in the workspace are visible by default)
-  const [workspaceFilter, setWorkspaceFilter] = useState<string>("all"); // "all" | workspaceId
+  // Filters — workspace defaults to whichever one is currently active, not
+  // "all", so the calendar only shows this workspace's tasks by default;
+  // "All Workspace" is still available in the dropdown as a deliberate
+  // cross-workspace view, not the starting point.
+  const [workspaceFilter, setWorkspaceFilter] = useState<string>(workspace.id); // "all" | workspaceId
   const [boardFilter, setBoardFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
@@ -123,6 +130,13 @@ export default function CalendarPage() {
   const [showSidePanel, setShowSidePanel] = useState<boolean>(true);
   const [showUnscheduled, setShowUnscheduled] = useState<boolean>(false);
   const [showThaiHolidays, setShowThaiHolidays] = useState<boolean>(true);
+
+  // Follow the active workspace if it changes elsewhere (e.g. the sidebar
+  // switcher) while this page stays mounted — otherwise the calendar keeps
+  // filtering by whichever workspace was active when it first loaded.
+  useEffect(() => {
+    setWorkspaceFilter(workspace.id);
+  }, [workspace.id]);
 
   // Month & Year calculations
   const year = currentDate.getFullYear();
@@ -143,6 +157,30 @@ export default function CalendarPage() {
     setSelectedDate(today);
   };
 
+  // Boards/tasks are hydrated globally (every workspace, every user — not
+  // scoped server-side), so "All Workspace" here must still mean "every
+  // workspace *I* belong to", not literally every board in the database.
+  // Without this, picking "All Workspace" bypassed workspace filtering
+  // entirely and leaked other users' workspaces onto the calendar.
+  const myWorkspaceIds = useMemo(() => new Set(workspaces.map((w) => w.id)), [workspaces]);
+
+  // Boards eligible for the Board Filter dropdown — scoped to whichever
+  // workspace is selected (or all of mine, if "All Workspace" is picked),
+  // so it doesn't list every board across every workspace in the system.
+  const boardsInScope = useMemo(() => {
+    const mine = boards.filter((b) => myWorkspaceIds.has(b.workspaceId));
+    if (workspaceFilter === "all") return mine;
+    return mine.filter((b) => b.workspaceId === workspaceFilter);
+  }, [boards, myWorkspaceIds, workspaceFilter]);
+
+  // If switching workspace leaves the selected board out of scope, fall
+  // back to "All Boards" instead of silently filtering on a stale id.
+  useEffect(() => {
+    if (boardFilter !== "all" && !boardsInScope.some((b) => b.id === boardFilter)) {
+      setBoardFilter("all");
+    }
+  }, [boardsInScope, boardFilter]);
+
   // Active unarchived tasks
   const activeTasks = useMemo(() => {
     return tasks.filter((t) => !t.isArchived);
@@ -151,11 +189,12 @@ export default function CalendarPage() {
   // Filter tasks based on selected settings
   const filteredTasks = useMemo(() => {
     return activeTasks.filter((task) => {
-      // Workspace filter
-      if (workspaceFilter !== "all") {
-        const taskBoard = boards.find((b) => b.id === task.boardId);
-        if (!taskBoard || taskBoard.workspaceId !== workspaceFilter) return false;
-      }
+      // Workspace filter — always restricted to workspaces I'm a member
+      // of; "all" only widens it to all of *those*, never every workspace
+      // in the system.
+      const taskBoard = boards.find((b) => b.id === task.boardId);
+      if (!taskBoard || !myWorkspaceIds.has(taskBoard.workspaceId)) return false;
+      if (workspaceFilter !== "all" && taskBoard.workspaceId !== workspaceFilter) return false;
 
       // Board filter
       if (boardFilter !== "all" && task.boardId !== boardFilter) return false;
@@ -182,6 +221,7 @@ export default function CalendarPage() {
     activeTasks,
     workspaceFilter,
     boards,
+    myWorkspaceIds,
     boardFilter,
     statusFilter,
     priorityFilter,
@@ -231,6 +271,61 @@ export default function CalendarPage() {
 
     return map;
   }, [personalTodos]);
+
+  // ─── Workspace Appointments (shared meetings, aggregated from every ────
+  // workspace I belong to) — created/managed from that workspace's own
+  // Calendar tab; this page just surfaces the ones I'm actually invited to.
+  const [workspaceAppointments, setWorkspaceAppointments] = useState<WorkspaceAppointment[]>([]);
+
+  useEffect(() => {
+    if (workspaces.length === 0) {
+      setWorkspaceAppointments([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      workspaces.map((w) =>
+        fetch(`/api/appointments?workspaceId=${encodeURIComponent(w.id)}`)
+          .then((r) => r.json())
+          .then((res) => (res?.success && Array.isArray(res.data) ? res.data : []))
+          .catch(() => [])
+      )
+    ).then((results) => {
+      if (cancelled) return;
+      const all: WorkspaceAppointment[] = results.flat().map((a: any) => ({
+        ...a,
+        startAt: new Date(a.startAt),
+        createdAt: new Date(a.createdAt),
+        updatedAt: new Date(a.updatedAt),
+      }));
+      setWorkspaceAppointments(all);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaces]);
+
+  // Only appointments I'm actually invited to (empty attendeeIds = everyone
+  // in that workspace), and — same "all" widening rule as tasks — scoped to
+  // the selected workspace filter rather than always showing every one.
+  const myAppointments = useMemo(() => {
+    return workspaceAppointments.filter((a) => {
+      const isAttendee = a.attendeeIds.length === 0 || a.attendeeIds.includes(currentUser.id);
+      if (!isAttendee) return false;
+      if (workspaceFilter !== "all" && a.workspaceId !== workspaceFilter) return false;
+      return true;
+    });
+  }, [workspaceAppointments, currentUser.id, workspaceFilter]);
+
+  const appointmentsByDate = useMemo(() => {
+    const map = new Map<string, WorkspaceAppointment[]>();
+    myAppointments.forEach((appt) => {
+      const key = toDateKey(appt.startAt);
+      const existing = map.get(key) || [];
+      map.set(key, [...existing, appt]);
+    });
+    return map;
+  }, [myAppointments]);
 
   // Monthly stats
   const monthlyStats = useMemo(() => {
@@ -292,6 +387,7 @@ export default function CalendarPage() {
   const selectedDateKey = toDateKey(selectedDate);
   const selectedDateTasks = tasksByDate.get(selectedDateKey) || [];
   const selectedDateTodos = todosByDate.get(selectedDateKey) || [];
+  const selectedDateAppointments = appointmentsByDate.get(selectedDateKey) || [];
   const selectedDayHoliday = showThaiHolidays ? getThaiHolidayForDate(selectedDate) : null;
 
   // Today key
@@ -312,6 +408,9 @@ export default function CalendarPage() {
 
   // Helper to schedule an unscheduled task to the selected date
   const handleScheduleTask = (taskId: string, targetDate: Date) => {
+    // Changing a due date is leader-only.
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task || !canDo("manage", task.boardId)) return;
     updateTaskDueDate(taskId, targetDate);
   };
 
@@ -395,11 +494,10 @@ export default function CalendarPage() {
               <button
                 type="button"
                 onClick={() => setShowUnscheduled(!showUnscheduled)}
-                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                  showUnscheduled
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${showUnscheduled
                     ? "border-amber-500/50 bg-amber-500/15 text-amber-300"
                     : "border-[#2e3144] bg-[#1f212c] text-zinc-300 hover:bg-zinc-800 hover:text-white"
-                }`}
+                  }`}
               >
                 <Clock className="h-3.5 w-3.5 text-amber-400" />
                 <span>Unscheduled ({unscheduledTasks.length})</span>
@@ -409,11 +507,10 @@ export default function CalendarPage() {
             <button
               type="button"
               onClick={() => setShowSidePanel(!showSidePanel)}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                showSidePanel
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${showSidePanel
                   ? "border-indigo-500/50 bg-indigo-600/10 text-indigo-400"
                   : "border-[#2e3144] bg-[#1f212c] text-zinc-300 hover:bg-zinc-800 hover:text-white"
-              }`}
+                }`}
             >
               <List className="h-3.5 w-3.5" />
               <span>{showSidePanel ? "Hide Details" : "Show Details"}</span>
@@ -460,20 +557,6 @@ export default function CalendarPage() {
 
         {/* Middle / Right: Filter dropdowns & Thai Holiday toggle */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Thai Holidays Toggle Switch */}
-          <button
-            type="button"
-            onClick={() => setShowThaiHolidays(!showThaiHolidays)}
-            title="Toggle Thailand Public Holidays"
-            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
-              showThaiHolidays
-                ? "border-rose-500/40 bg-rose-500/15 text-rose-300 font-semibold"
-                : "border-[#2e3144] bg-[#1f212c] text-zinc-400 hover:text-white"
-            }`}
-          >
-            <span>🇹🇭</span>
-            <span>วันหยุดไทย</span>
-          </button>
 
           {/* Workspace Filter */}
           <div className="flex items-center gap-1 bg-[#1f212c] border border-[#2e3144] rounded-lg px-2 py-0.5">
@@ -507,7 +590,7 @@ export default function CalendarPage() {
               <option value="all" className="bg-[#1c1e28] text-white">
                 All Boards
               </option>
-              {boards.map((b) => (
+              {boardsInScope.map((b) => (
                 <option key={b.id} value={b.id} className="bg-[#1c1e28] text-white">
                   {b.name}
                 </option>
@@ -562,11 +645,10 @@ export default function CalendarPage() {
               type="button"
               onClick={() => setViewMode("month")}
               title="Month Grid"
-              className={`p-1 rounded-md transition-colors ${
-                viewMode === "month"
+              className={`p-1 rounded-md transition-colors ${viewMode === "month"
                   ? "bg-indigo-600 text-white shadow-xs font-semibold"
                   : "text-zinc-400 hover:text-white"
-              }`}
+                }`}
             >
               <LayoutGrid className="h-3.5 w-3.5" />
             </button>
@@ -574,11 +656,10 @@ export default function CalendarPage() {
               type="button"
               onClick={() => setViewMode("agenda")}
               title="Agenda Timeline"
-              className={`p-1 rounded-md transition-colors ${
-                viewMode === "agenda"
+              className={`p-1 rounded-md transition-colors ${viewMode === "agenda"
                   ? "bg-indigo-600 text-white shadow-xs font-semibold"
                   : "text-zinc-400 hover:text-white"
-              }`}
+                }`}
             >
               <List className="h-3.5 w-3.5" />
             </button>
@@ -661,11 +742,10 @@ export default function CalendarPage() {
                 {weekDayNames.map((d, index) => (
                   <div
                     key={d}
-                    className={`py-1.5 text-[11px] font-bold uppercase tracking-wider ${
-                      index === 0 || index === 6
+                    className={`py-1.5 text-[11px] font-bold uppercase tracking-wider ${index === 0 || index === 6
                         ? "text-rose-400/80"
                         : "text-zinc-400"
-                    }`}
+                      }`}
                   >
                     {d}
                   </div>
@@ -678,6 +758,7 @@ export default function CalendarPage() {
                   const cellKey = toDateKey(date);
                   const dayTasks = tasksByDate.get(cellKey) || [];
                   const dayTodos = todosByDate.get(cellKey) || [];
+                  const dayAppointments = appointmentsByDate.get(cellKey) || [];
                   const isToday = cellKey === todayKey;
                   const isSelected = cellKey === selectedDateKey;
                   const holiday = showThaiHolidays ? getThaiHolidayForDate(date) : null;
@@ -686,40 +767,38 @@ export default function CalendarPage() {
                     <div
                       key={cellKey}
                       onClick={() => setSelectedDate(date)}
-                      className={`group relative flex flex-col min-h-[95px] p-1.5 rounded-lg border transition-all cursor-pointer ${
-                        isSelected
+                      className={`group relative flex flex-col min-h-[95px] p-1.5 rounded-lg border transition-all cursor-pointer ${isSelected
                           ? "bg-[#252837] border-indigo-500 shadow-lg ring-1 ring-indigo-500/50"
                           : isToday
-                          ? "bg-[#1c1e2a] border-sky-500/50 shadow-xs"
-                          : holiday
-                          ? "bg-[#1f1a24] border-rose-900/30 hover:border-rose-700/60"
-                          : isCurrentMonth
-                          ? "bg-[#181a24] border-[#222433] hover:border-zinc-700/80 hover:bg-[#1f2230]"
-                          : "bg-[#14151e]/60 border-transparent opacity-40 hover:opacity-75"
-                      }`}
+                            ? "bg-[#1c1e2a] border-sky-500/50 shadow-xs"
+                            : holiday
+                              ? "bg-[#1f1a24] border-rose-900/30 hover:border-rose-700/60"
+                              : isCurrentMonth
+                                ? "bg-[#181a24] border-[#222433] hover:border-zinc-700/80 hover:bg-[#1f2230]"
+                                : "bg-[#14151e]/60 border-transparent opacity-40 hover:opacity-75"
+                        }`}
                     >
                       {/* Cell Header: Date Number, Thai Flag / Holiday Indicator & Add Button */}
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-1 min-w-0">
                           <span
-                            className={`flex items-center justify-center h-5 w-5 rounded-full text-xs font-semibold ${
-                              isToday
+                            className={`flex items-center justify-center h-5 w-5 rounded-full text-xs font-semibold ${isToday
                                 ? "bg-sky-500 text-white font-bold"
                                 : isSelected
-                                ? "bg-indigo-600 text-white font-bold"
-                                : holiday
-                                ? "bg-rose-600 text-white font-bold"
-                                : isCurrentMonth
-                                ? "text-zinc-200"
-                                : "text-zinc-500"
-                            }`}
+                                  ? "bg-indigo-600 text-white font-bold"
+                                  : holiday
+                                    ? "bg-rose-600 text-white font-bold"
+                                    : isCurrentMonth
+                                      ? "text-zinc-200"
+                                      : "text-zinc-500"
+                              }`}
                           >
                             {date.getDate()}
                           </span>
 
-                          {dayTasks.length + dayTodos.length > 0 && (
+                          {dayTasks.length + dayAppointments.length + dayTodos.length > 0 && (
                             <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800/80 rounded-full px-1.5 py-0.2">
-                              {dayTasks.length + dayTodos.length}
+                              {dayTasks.length + dayAppointments.length + dayTodos.length}
                             </span>
                           )}
                         </div>
@@ -765,13 +844,12 @@ export default function CalendarPage() {
                                 openTaskModal(task.id);
                               }}
                               title={`${task.title} (${statusCfg.label}) - ${boardInfo.name}`}
-                              className={`group/chip flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] truncate border transition-all ${
-                                isTaskDone
+                              className={`group/chip flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] truncate border transition-all ${isTaskDone
                                   ? "bg-emerald-950/20 border-emerald-800/30 text-zinc-400 line-through"
                                   : overdue
-                                  ? "bg-red-950/30 border-red-800/40 text-red-200 hover:border-red-500"
-                                  : "bg-[#222533] border-[#2f3346] text-zinc-200 hover:border-indigo-500/60 hover:bg-[#2b2f42]"
-                              }`}
+                                    ? "bg-red-950/30 border-red-800/40 text-red-200 hover:border-red-500"
+                                    : "bg-[#222533] border-[#2f3346] text-zinc-200 hover:border-indigo-500/60 hover:bg-[#2b2f42]"
+                                }`}
                             >
                               {/* Board color vertical stripe */}
                               <span
@@ -798,9 +876,32 @@ export default function CalendarPage() {
                           );
                         })}
 
-                        {/* Personal to-do chips (fill remaining slots after tasks) */}
-                        {dayTodos
+                        {/* Workspace appointment chips (fill remaining slots after tasks) */}
+                        {dayAppointments
                           .slice(0, Math.max(0, (holiday ? 2 : 3) - dayTasks.length))
+                          .map((appt) => (
+                            <div
+                              key={`${appt.id}-${cellKey}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/workspace/${appt.workspaceId}?tab=calendar`);
+                              }}
+                              title={`${appt.title} (Workspace Appointment) at ${appt.startAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+                              className="group/chip flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] truncate border border-dashed bg-emerald-950/20 border-emerald-700/40 text-emerald-200 hover:border-emerald-500 transition-all"
+                            >
+                              <CalendarCheck2 className="h-3 w-3 shrink-0" />
+                              <span className="truncate font-medium flex-1">
+                                {appt.title}
+                              </span>
+                            </div>
+                          ))}
+
+                        {/* Personal to-do chips (fill remaining slots after tasks + appointments) */}
+                        {dayTodos
+                          .slice(
+                            0,
+                            Math.max(0, (holiday ? 2 : 3) - dayTasks.length - dayAppointments.length)
+                          )
                           .map((todo) => (
                             <div
                               key={`${todo.id}-${cellKey}`}
@@ -809,11 +910,10 @@ export default function CalendarPage() {
                                 toggleTodoComplete(todo.id);
                               }}
                               title={`${todo.title} (Personal To-Do)`}
-                              className={`group/chip flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] truncate border border-dashed transition-all ${
-                                todo.isCompleted
+                              className={`group/chip flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] truncate border border-dashed transition-all ${todo.isCompleted
                                   ? "bg-violet-950/10 border-violet-800/30 text-zinc-500 line-through"
                                   : "bg-violet-950/20 border-violet-700/40 text-violet-200 hover:border-violet-500"
-                              }`}
+                                }`}
                             >
                               <StickyNote className="h-3 w-3 shrink-0" />
                               <span className="truncate font-medium flex-1">
@@ -823,9 +923,9 @@ export default function CalendarPage() {
                           ))}
 
                         {/* "+N more" badge */}
-                        {dayTasks.length + dayTodos.length > (holiday ? 2 : 3) && (
+                        {dayTasks.length + dayAppointments.length + dayTodos.length > (holiday ? 2 : 3) && (
                           <div className="text-[10px] font-bold text-indigo-400 pl-1 hover:underline">
-                            +{dayTasks.length + dayTodos.length - (holiday ? 2 : 3)} more
+                            +{dayTasks.length + dayAppointments.length + dayTodos.length - (holiday ? 2 : 3)} more
                           </div>
                         )}
                       </div>
@@ -898,11 +998,10 @@ export default function CalendarPage() {
                             className="min-w-0 flex-1 cursor-pointer"
                           >
                             <p
-                              className={`text-xs sm:text-sm font-semibold truncate ${
-                                isTaskDone
+                              className={`text-xs sm:text-sm font-semibold truncate ${isTaskDone
                                   ? "line-through text-zinc-500"
                                   : "text-zinc-200 group-hover:text-white"
-                              }`}
+                                }`}
                             >
                               {task.title}
                             </p>
@@ -940,11 +1039,10 @@ export default function CalendarPage() {
                           {parsedDue && (
                             <div className="text-right shrink-0">
                               <span
-                                className={`text-xs font-medium tabular-nums ${
-                                  overdue
+                                className={`text-xs font-medium tabular-nums ${overdue
                                     ? "text-red-400 font-bold"
                                     : "text-zinc-400"
-                                }`}
+                                  }`}
                               >
                                 {overdue ? "⚠ " : ""}
                                 {formatDate(parsedDue)}
@@ -989,7 +1087,7 @@ export default function CalendarPage() {
                   })}
                 </h3>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  {selectedDateTasks.length} {selectedDateTasks.length === 1 ? "task" : "tasks"} · {selectedDateTodos.length} personal {selectedDateTodos.length === 1 ? "to-do" : "to-dos"}
+                  {selectedDateTasks.length} {selectedDateTasks.length === 1 ? "task" : "tasks"} · {selectedDateAppointments.length} {selectedDateAppointments.length === 1 ? "appointment" : "appointments"} · {selectedDateTodos.length} personal {selectedDateTodos.length === 1 ? "to-do" : "to-dos"}
                 </p>
               </div>
 
@@ -1011,7 +1109,10 @@ export default function CalendarPage() {
 
             {/* Tasks list on selected day */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {selectedDateTasks.length === 0 && selectedDateTodos.length === 0 && !isAddingTodo ? (
+              {selectedDateTasks.length === 0 &&
+              selectedDateAppointments.length === 0 &&
+              selectedDateTodos.length === 0 &&
+              !isAddingTodo ? (
                 <div className="py-12 text-center rounded-xl border border-dashed border-[#2e3144] bg-[#14151c]/60 p-4 space-y-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800/80 text-zinc-500 mx-auto">
                     <StickyNote className="h-5 w-5" />
@@ -1043,7 +1144,9 @@ export default function CalendarPage() {
                     const parsedDue = parseSafeDate(task.dueDate);
                     const overdue = isOverdue(parsedDue, task.status);
                     const boardInfo = getBoardDetails(task.boardId);
-                    const assignee = users.find((u) => u.id === task.assigneeId);
+                    const taskAssignees = task.assigneeIds
+                      .map((id) => users.find((u) => u.id === id))
+                      .filter((u): u is (typeof users)[number] => Boolean(u));
 
                     return (
                       <div
@@ -1065,11 +1168,10 @@ export default function CalendarPage() {
                           {/* Task title */}
                           <div className="min-w-0 flex-1">
                             <h4
-                              className={`text-xs font-semibold leading-snug ${
-                                isTaskDone
+                              className={`text-xs font-semibold leading-snug ${isTaskDone
                                   ? "line-through text-zinc-500"
                                   : "text-zinc-100 group-hover:text-white"
-                              }`}
+                                }`}
                             >
                               {task.title}
                             </h4>
@@ -1084,12 +1186,24 @@ export default function CalendarPage() {
                         {/* Assignee & Due Date (read-only) */}
                         <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-1 border-t border-[#292c3d]/40">
                           <div className="flex items-center gap-1.5 truncate">
-                            {assignee ? (
-                              <span className="flex items-center gap-1 text-zinc-300">
-                                <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white ${assignee.avatarColor || 'bg-indigo-600'}`}>
-                                  {assignee.avatarInitials}
+                            {taskAssignees.length > 0 ? (
+                              <span className="flex items-center gap-1 text-zinc-300 min-w-0">
+                                <span className="flex items-center -space-x-1 shrink-0">
+                                  {taskAssignees.slice(0, 3).map((a) => (
+                                    <span
+                                      key={a.id}
+                                      title={a.name}
+                                      className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white ring-1 ring-[#1c1e2a] ${a.avatarColor || "bg-indigo-600"}`}
+                                    >
+                                      {a.avatarInitials}
+                                    </span>
+                                  ))}
                                 </span>
-                                <span className="truncate">{assignee.name}</span>
+                                <span className="truncate">
+                                  {taskAssignees.length === 1
+                                    ? taskAssignees[0].name
+                                    : `${taskAssignees.length} people`}
+                                </span>
                               </span>
                             ) : (
                               <span className="text-zinc-500 italic">Unassigned</span>
@@ -1098,9 +1212,8 @@ export default function CalendarPage() {
 
                           {parsedDue && (
                             <span
-                              className={`text-[10px] font-medium tabular-nums ${
-                                overdue ? "text-red-400 font-bold" : "text-zinc-400"
-                              }`}
+                              className={`text-[10px] font-medium tabular-nums ${overdue ? "text-red-400 font-bold" : "text-zinc-400"
+                                }`}
                             >
                               {overdue ? "⚠ " : ""}
                               {formatDate(parsedDue)}
@@ -1134,6 +1247,47 @@ export default function CalendarPage() {
                     );
                   })}
 
+                  {/* ─── Workspace Appointments Section ───────────────────── */}
+                  {selectedDateAppointments.length > 0 && (
+                    <div className="pt-3 mt-1 border-t border-[#262836] space-y-2">
+                      <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400">
+                        <CalendarCheck2 className="h-3.5 w-3.5" />
+                        <span>Workspace Appointments</span>
+                      </span>
+
+                      {selectedDateAppointments.map((appt) => {
+                        const apptWorkspace = workspaces.find((w) => w.id === appt.workspaceId);
+                        const creator = users.find((u) => u.id === appt.createdById);
+                        return (
+                          <div
+                            key={appt.id}
+                            onClick={() => router.push(`/workspace/${appt.workspaceId}?tab=calendar`)}
+                            title="Open in workspace calendar"
+                            className="flex items-start gap-2.5 p-2.5 rounded-xl border border-dashed border-emerald-800/40 bg-emerald-950/10 hover:border-emerald-500/60 transition-all cursor-pointer group"
+                          >
+                            <CalendarCheck2 className="h-4 w-4 mt-0.5 text-emerald-400 shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold leading-snug text-zinc-100">
+                                {appt.title}
+                              </p>
+                              <span className="flex items-center gap-1 text-[10px] text-zinc-400 mt-0.5">
+                                <Clock className="h-3 w-3" />
+                                {appt.startAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                {apptWorkspace ? ` · ${apptWorkspace.name}` : ""}
+                                {creator ? ` · by ${creator.name}` : ""}
+                              </span>
+                              {appt.notes && (
+                                <p className="text-[11px] text-zinc-400 line-clamp-2 mt-1">
+                                  {appt.notes}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {/* ─── Personal To-Do Section ───────────────────────────── */}
                   <div className="pt-3 mt-1 border-t border-[#262836] space-y-2">
                     <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-violet-400">
@@ -1160,11 +1314,10 @@ export default function CalendarPage() {
 
                         <div className="min-w-0 flex-1">
                           <p
-                            className={`text-xs font-semibold leading-snug ${
-                              todo.isCompleted
+                            className={`text-xs font-semibold leading-snug ${todo.isCompleted
                                 ? "line-through text-zinc-500"
                                 : "text-zinc-100"
-                            }`}
+                              }`}
                           >
                             {todo.title}
                           </p>

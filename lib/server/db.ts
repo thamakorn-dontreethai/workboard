@@ -1,6 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { prisma } from "./prisma";
+import { sendAppointmentReminderEmail } from "./email";
+import type { CommentAttachment } from "@/types";
 import {
   Workspace,
   User,
@@ -15,6 +17,9 @@ import {
   Post,
   Folder,
   WorkspaceFile,
+  WorkspaceAppointment,
+  Dashboard,
+  DashboardWidgetId,
   TaskStatus,
   TaskPriority,
   BoardInvitation,
@@ -321,6 +326,23 @@ export async function updateWorkspace(
   id: string,
   updates: Partial<Workspace>
 ): Promise<Workspace> {
+  // Defense in depth alongside the client-side check: a `members` update
+  // that would drop whoever currently holds "owner" is refused outright —
+  // there's no ownership-transfer flow yet, so that would leave the
+  // workspace ownerless. This guards the API directly, not just the UI.
+  if (updates.members) {
+    const current = await getWorkspaceById(id);
+    if (current) {
+      const currentOwnerIds = current.members
+        .filter((m) => m.role === "owner")
+        .map((m) => m.userId);
+      const nextIds = new Set(updates.members.map((m) => m.userId));
+      if (currentOwnerIds.some((oid) => !nextIds.has(oid))) {
+        throw new Error("Cannot remove the workspace owner.");
+      }
+    }
+  }
+
   if (isPrismaEnabled) {
     try {
       const row = await prisma.workspace.update({
@@ -399,6 +421,9 @@ export async function getUsers(): Promise<User[]> {
         avatarColor: u.avatarColor,
         role: u.role,
         isActive: u.isActive,
+        notifyPostLikes: u.notifyPostLikes,
+        notifyPostComments: u.notifyPostComments,
+        notifyNewPosts: u.notifyNewPosts,
       }));
     } catch (e) {
       console.warn("Prisma getUsers fallback:", e);
@@ -420,6 +445,9 @@ export async function getUserById(id: string): Promise<User | undefined> {
           avatarColor: u.avatarColor,
           role: u.role,
           isActive: u.isActive,
+          notifyPostLikes: u.notifyPostLikes,
+          notifyPostComments: u.notifyPostComments,
+          notifyNewPosts: u.notifyNewPosts,
         };
       }
     } catch (e) {
@@ -1041,7 +1069,7 @@ export async function deleteGroup(id: string): Promise<boolean> {
 export async function getTasks(filter?: {
   boardId?: string;
   groupId?: string;
-  assigneeId?: string;
+  assigneeId?: string; // matches tasks where this person is one of the assignees
   status?: TaskStatus;
 }): Promise<Task[]> {
   if (isPrismaEnabled) {
@@ -1051,7 +1079,7 @@ export async function getTasks(filter?: {
           isArchived: false,
           ...(filter?.boardId && { boardId: filter.boardId }),
           ...(filter?.groupId && { groupId: filter.groupId }),
-          ...(filter?.assigneeId && { assigneeId: filter.assigneeId }),
+          ...(filter?.assigneeId && { assigneeIds: { has: filter.assigneeId } }),
           ...(filter?.status && { status: filter.status }),
         },
         include: {
@@ -1071,7 +1099,7 @@ export async function getTasks(filter?: {
         description: t.description || "",
         status: (t.status as any) || "todo",
         priority: (t.priority as any) || "medium",
-        assigneeId: t.assigneeId,
+        assigneeIds: t.assigneeIds,
         reporterId: t.reporterId,
         dueDate: t.dueDate,
         category: t.category,
@@ -1100,7 +1128,7 @@ export async function getTasks(filter?: {
     result = result.filter((t) => t.groupId === filter.groupId);
   }
   if (filter?.assigneeId) {
-    result = result.filter((t) => t.assigneeId === filter.assigneeId);
+    result = result.filter((t) => (t.assigneeIds || []).includes(filter.assigneeId!));
   }
   if (filter?.status) {
     result = result.filter((t) => t.status === filter.status);
@@ -1126,7 +1154,7 @@ export async function getTaskById(id: string): Promise<Task | undefined> {
           description: t.description || "",
           status: (t.status as any) || "todo",
           priority: (t.priority as any) || "medium",
-          assigneeId: t.assigneeId,
+          assigneeIds: t.assigneeIds,
           reporterId: t.reporterId,
           dueDate: t.dueDate,
           category: t.category,
@@ -1154,7 +1182,7 @@ export async function createTask(data: {
   description?: string;
   boardId: string;
   groupId: string;
-  assigneeId?: string | null;
+  assigneeIds?: string[];
   priority?: TaskPriority;
   status?: TaskStatus;
   dueDate?: Date | null;
@@ -1184,7 +1212,7 @@ export async function createTask(data: {
     description: data.description || "",
     status: data.status || "todo",
     priority: data.priority || "medium",
-    assigneeId: data.assigneeId || null,
+    assigneeIds: data.assigneeIds || [],
     reporterId: data.reporterId || db.users[0]?.id || "user-somchai",
     dueDate: data.dueDate || null,
     category: data.category || "General",
@@ -1222,7 +1250,7 @@ export async function createTask(data: {
           description: newTask.description,
           status: newTask.status,
           priority: newTask.priority,
-          assigneeId: newTask.assigneeId,
+          assigneeIds: newTask.assigneeIds,
           reporterId: newTask.reporterId,
           dueDate: newTask.dueDate,
           category: newTask.category,
@@ -1268,7 +1296,6 @@ export async function updateTask(
       | "priority"
       | "dueDate"
       | "category"
-      | "assigneeId"
       | "groupId"
       | "order"
     >
@@ -1291,9 +1318,6 @@ export async function updateTask(
           ...(updates.priority && { priority: updates.priority }),
           ...(updates.dueDate !== undefined && { dueDate: updates.dueDate }),
           ...(updates.category && { category: updates.category }),
-          ...(updates.assigneeId !== undefined && {
-            assigneeId: updates.assigneeId,
-          }),
           ...(updates.groupId && { groupId: updates.groupId }),
           ...(updates.order !== undefined && { order: updates.order }),
         },
@@ -1322,7 +1346,7 @@ export async function updateTask(
         description: updated.description || "",
         status: (updated.status as any) || "todo",
         priority: (updated.priority as any) || "medium",
-        assigneeId: updated.assigneeId,
+        assigneeIds: updated.assigneeIds,
         reporterId: updated.reporterId,
         dueDate: updated.dueDate,
         category: updated.category,
@@ -1373,47 +1397,70 @@ export async function updateTask(
 
 export async function assignTask(
   taskId: string,
-  newAssigneeId: string | null,
+  newAssigneeIds: string[],
   actorId?: string
 ): Promise<Task | null> {
   if (isPrismaEnabled) {
     try {
+      const before = await prisma.task.findUnique({
+        where: { id: taskId },
+        select: { assigneeIds: true },
+      });
+      const previousIds = before?.assigneeIds || [];
+
       const updated = await prisma.task.update({
         where: { id: taskId },
-        data: { assigneeId: newAssigneeId },
+        data: { assigneeIds: newAssigneeIds },
         include: { subtasks: true, comments: true, activities: true },
       });
 
       const effectiveActorId = actorId || updated.reporterId;
-      const newAssignee = newAssigneeId
-        ? await prisma.user.findUnique({ where: { id: newAssigneeId } })
-        : null;
+      const addedIds = newAssigneeIds.filter((id) => !previousIds.includes(id));
+      const removedIds = previousIds.filter((id) => !newAssigneeIds.includes(id));
 
-      await prisma.activity.create({
-        data: {
-          id: `act-${Date.now()}`,
-          taskId,
-          boardId: updated.boardId,
-          actorId: effectiveActorId,
-          type: "assignee_changed",
-          description: newAssignee
-            ? `assigned item to ${newAssignee.name}`
-            : "unassigned item",
-        },
-      }).catch(() => {});
+      if (addedIds.length > 0 || removedIds.length > 0) {
+        const [addedUsers, removedUsers] = await Promise.all([
+          addedIds.length > 0
+            ? prisma.user.findMany({ where: { id: { in: addedIds } } })
+            : Promise.resolve([]),
+          removedIds.length > 0
+            ? prisma.user.findMany({ where: { id: { in: removedIds } } })
+            : Promise.resolve([]),
+        ]);
+        const parts: string[] = [];
+        if (addedUsers.length) parts.push(`assigned to ${addedUsers.map((u) => u.name).join(", ")}`);
+        if (removedUsers.length) parts.push(`removed ${removedUsers.map((u) => u.name).join(", ")}`);
 
-      if (newAssigneeId && newAssigneeId !== effectiveActorId) {
-        await prisma.notification.create({
+        await prisma.activity.create({
           data: {
-            id: `notif-${Date.now()}`,
-            userId: newAssigneeId,
-            type: "assignment",
-            title: "New Task Assigned",
-            body: `You were assigned to "${updated.title}"`,
-            taskId: updated.id,
+            id: `act-${Date.now()}`,
+            taskId,
             boardId: updated.boardId,
+            actorId: effectiveActorId,
+            type: "assignee_changed",
+            description: parts.join("; ") || "updated assignees",
           },
         }).catch(() => {});
+
+        // Only the newly added people get notified — not everyone who
+        // stays on the task, and never the person making the change.
+        await Promise.all(
+          addedIds
+            .filter((id) => id !== effectiveActorId)
+            .map((id) =>
+              prisma.notification.create({
+                data: {
+                  id: `notif-${Date.now()}-${id}`,
+                  userId: id,
+                  type: "assignment",
+                  title: "New Task Assigned",
+                  body: `You were assigned to "${updated.title}"`,
+                  taskId: updated.id,
+                  boardId: updated.boardId,
+                },
+              }).catch(() => {})
+            )
+        );
       }
 
       return {
@@ -1425,7 +1472,7 @@ export async function assignTask(
         description: updated.description || "",
         status: (updated.status as any) || "todo",
         priority: (updated.priority as any) || "medium",
-        assigneeId: updated.assigneeId,
+        assigneeIds: updated.assigneeIds,
         reporterId: updated.reporterId,
         dueDate: updated.dueDate,
         category: updated.category,
@@ -1449,42 +1496,48 @@ export async function assignTask(
   if (!task) return null;
 
   const effectiveActorId = actorId || db.users[0]?.id || "user-somchai";
-  const newAssignee = newAssigneeId
-    ? db.users.find((u) => u.id === newAssigneeId)
-    : null;
+  const previousIds = task.assigneeIds || [];
+  const addedIds = newAssigneeIds.filter((id) => !previousIds.includes(id));
+  const removedIds = previousIds.filter((id) => !newAssigneeIds.includes(id));
+  const addedUsers = db.users.filter((u) => addedIds.includes(u.id));
+  const removedUsers = db.users.filter((u) => removedIds.includes(u.id));
 
-  task.assigneeId = newAssigneeId;
+  task.assigneeIds = newAssigneeIds;
   task.updatedAt = new Date();
 
-  // Log activity
-  const act: Activity = {
-    id: `act-${Date.now()}`,
-    taskId,
-    boardId: task.boardId,
-    actorId: effectiveActorId,
-    type: "assignee_changed",
-    description: newAssignee
-      ? `assigned item to ${newAssignee.name}`
-      : "unassigned item",
-    createdAt: new Date(),
-  };
-  db.activities.unshift(act);
-  task.activityIds.push(act.id);
+  if (addedIds.length > 0 || removedIds.length > 0) {
+    const parts: string[] = [];
+    if (addedUsers.length) parts.push(`assigned to ${addedUsers.map((u) => u.name).join(", ")}`);
+    if (removedUsers.length) parts.push(`removed ${removedUsers.map((u) => u.name).join(", ")}`);
 
-  // Send notification to assignee
-  if (newAssigneeId && newAssigneeId !== effectiveActorId) {
-    const notif: Notification = {
-      id: `notif-${Date.now()}`,
-      userId: newAssigneeId,
-      type: "assignment",
-      title: "New Task Assigned",
-      body: `You were assigned to "${task.title}"`,
-      taskId: task.id,
+    const act: Activity = {
+      id: `act-${Date.now()}`,
+      taskId,
       boardId: task.boardId,
-      isRead: false,
+      actorId: effectiveActorId,
+      type: "assignee_changed",
+      description: parts.join("; ") || "updated assignees",
       createdAt: new Date(),
     };
-    db.notifications.unshift(notif);
+    db.activities.unshift(act);
+    task.activityIds.push(act.id);
+
+    addedIds
+      .filter((id) => id !== effectiveActorId)
+      .forEach((id) => {
+        const notif: Notification = {
+          id: `notif-${Date.now()}-${id}`,
+          userId: id,
+          type: "assignment",
+          title: "New Task Assigned",
+          body: `You were assigned to "${task.title}"`,
+          taskId: task.id,
+          boardId: task.boardId,
+          isRead: false,
+          createdAt: new Date(),
+        };
+        db.notifications.unshift(notif);
+      });
   }
 
   writeDb(db);
@@ -1514,6 +1567,136 @@ export async function deleteTask(id: string): Promise<boolean> {
 
 // ─── Comments Operations ────────────────────────────────────────────────────
 
+function mapCommentRow(c: {
+  id: string;
+  taskId: string;
+  authorId: string;
+  content: string;
+  isEdited: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  // Json column — typed loosely so this compiles before/after `prisma generate`.
+  attachments?: unknown;
+}): Comment {
+  return {
+    id: c.id,
+    taskId: c.taskId,
+    authorId: c.authorId,
+    content: c.content,
+    attachments: Array.isArray(c.attachments) ? (c.attachments as CommentAttachment[]) : [],
+    isEdited: c.isEdited,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+  };
+}
+
+// What the API returns: the stored base64 data URL is swapped for a download
+// URL, so list responses stay small no matter how many files are attached.
+function toPublicComment(c: Comment): Comment {
+  return {
+    ...c,
+    attachments: (c.attachments ?? []).map((a) => ({
+      ...a,
+      url: `/api/comments/${c.id}/attachments/${a.id}`,
+    })),
+  };
+}
+
+// Server-side use only: the stored attachment (url = data URL) for download.
+export async function getCommentAttachment(
+  commentId: string,
+  attachmentId: string
+): Promise<CommentAttachment | null> {
+  const db = readDb();
+  const comment = await findComment(commentId, db);
+  return comment?.attachments?.find((a) => a.id === attachmentId) ?? null;
+}
+
+// Ids of people @mentioned in `content`. Names contain spaces
+// ("Sarah Chen"), so this matches "@<full name>" rather than tokenising.
+function findMentionedUserIds(
+  content: string,
+  people: { id: string; name: string }[]
+): string[] {
+  const text = content.toLowerCase();
+  return people
+    .filter((p) => p.name && text.includes(`@${p.name.toLowerCase()}`))
+    .map((p) => p.id);
+}
+
+// Notifies people about a comment: @mentioned users get a "mention", and the
+// task's assignees/reporter get a "comment". Never the author. On an edit
+// (`previousContent` given) only *newly* mentioned users are notified, so
+// fixing a typo doesn't re-ping everyone. Mutates `db.notifications` for the
+// JSON fallback — the caller is responsible for writeDb().
+async function notifyCommentRecipients(
+  comment: Comment,
+  db: DatabaseSchema,
+  previousContent?: string
+): Promise<void> {
+  try {
+    const task = isPrismaEnabled
+      ? await prisma.task.findUnique({ where: { id: comment.taskId } })
+      : db.tasks.find((t) => t.id === comment.taskId);
+    if (!task) return;
+
+    const people: { id: string; name: string }[] = isPrismaEnabled
+      ? await prisma.user.findMany({ select: { id: true, name: true } })
+      : db.users;
+    const author = people.find((p) => p.id === comment.authorId);
+
+    const mentioned = new Set(findMentionedUserIds(comment.content, people));
+    if (previousContent !== undefined) {
+      findMentionedUserIds(previousContent, people).forEach((id) => mentioned.delete(id));
+    }
+    mentioned.delete(comment.authorId);
+
+    const involved = new Set<string>();
+    if (previousContent === undefined) {
+      [...task.assigneeIds, task.reporterId].forEach((id) => involved.add(id));
+      involved.delete(comment.authorId);
+      mentioned.forEach((id) => involved.delete(id));
+    }
+
+    const snippet = !comment.content
+      ? "sent an attachment"
+      : comment.content.length > 80
+      ? `${comment.content.slice(0, 80)}…`
+      : comment.content;
+    const who = author?.name || "Someone";
+    const rows = [
+      ...[...mentioned].map((userId) => ({
+        userId,
+        type: "mention" as const,
+        title: "You were mentioned",
+        body: `${who} mentioned you on "${task.title}": ${snippet}`,
+      })),
+      ...[...involved].map((userId) => ({
+        userId,
+        type: "comment" as const,
+        title: "New comment",
+        body: `${who} commented on "${task.title}": ${snippet}`,
+      })),
+    ];
+
+    for (const row of rows) {
+      const notif = {
+        id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        ...row,
+        taskId: task.id,
+        boardId: task.boardId,
+      };
+      if (isPrismaEnabled) {
+        await prisma.notification.create({ data: notif }).catch(() => {});
+      } else {
+        db.notifications.unshift({ ...notif, isRead: false, createdAt: new Date() });
+      }
+    }
+  } catch (e) {
+    console.warn("Failed to send comment notifications:", e);
+  }
+}
+
 export async function getComments(taskId?: string): Promise<Comment[]> {
   if (isPrismaEnabled) {
     try {
@@ -1522,15 +1705,7 @@ export async function getComments(taskId?: string): Promise<Comment[]> {
         orderBy: { createdAt: "desc" },
       });
       // An empty array is a legitimate answer, not a signal to fall back.
-      return comments.map((c) => ({
-        id: c.id,
-        taskId: c.taskId,
-        authorId: c.authorId,
-        content: c.content,
-        isEdited: c.isEdited,
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
-      }));
+      return comments.map((c) => toPublicComment(mapCommentRow(c)));
     } catch (e) {
       console.warn("Prisma getComments fallback:", e);
     }
@@ -1540,24 +1715,34 @@ export async function getComments(taskId?: string): Promise<Comment[]> {
   if (taskId) {
     return db.comments
       .filter((c) => c.taskId === taskId)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .map(toPublicComment);
   }
-  return db.comments;
+  return db.comments.map(toPublicComment);
 }
 
 export async function addComment(data: {
   taskId: string;
   authorId: string;
   content: string;
+  attachments?: { name: string; size: number; mimeType: string; url: string }[];
 }): Promise<Comment> {
   const db = readDb();
   const task = db.tasks.find((t) => t.id === data.taskId);
+  const id = `comment-${Date.now()}`;
 
   const newComment: Comment = {
-    id: `comment-${Date.now()}`,
+    id,
     taskId: data.taskId,
     authorId: data.authorId,
     content: data.content.trim(),
+    attachments: (data.attachments ?? []).map((a, i) => ({
+      id: `att-${Date.now()}-${i}`,
+      name: a.name,
+      size: a.size,
+      mimeType: a.mimeType,
+      url: a.url,
+    })),
     isEdited: false,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -1571,21 +1756,130 @@ export async function addComment(data: {
           taskId: newComment.taskId,
           authorId: newComment.authorId,
           content: newComment.content,
+          // Only sent when there are files, so plain comments keep working
+          // even before the `attachments` column has been pushed to the DB.
+          ...(newComment.attachments!.length > 0 && {
+            attachments: newComment.attachments as any,
+          }),
           isEdited: false,
         },
       });
     } catch (e) {
       console.warn("Prisma addComment fallback:", e);
+      // Files only ever live in Postgres — falling back to the JSON file
+      // would report success and then lose them on reload. Fail loudly so
+      // the UI shows an error instead.
+      if (newComment.attachments!.length > 0) {
+        throw new Error(
+          "Could not save attachments. Run `npx prisma generate` and `npm run db:push`, then restart the dev server."
+        );
+      }
     }
   }
 
-  db.comments.unshift(newComment);
+  // With Postgres as the source of truth, don't duplicate the base64 blobs
+  // into the JSON fallback file.
+  db.comments.unshift(
+    isPrismaEnabled ? { ...newComment, attachments: [] } : newComment
+  );
   if (task) {
     task.commentIds.push(newComment.id);
   }
 
+  await notifyCommentRecipients(newComment, db);
   writeDb(db);
-  return newComment;
+  return toPublicComment(newComment);
+}
+
+export type CommentMutationResult =
+  | { ok: true; comment: Comment }
+  | { ok: false; reason: "not_found" | "forbidden" | "empty" };
+
+async function findComment(id: string, db: DatabaseSchema): Promise<Comment | null> {
+  if (isPrismaEnabled) {
+    try {
+      const row = await prisma.comment.findUnique({ where: { id } });
+      if (row) return mapCommentRow(row);
+    } catch (e) {
+      console.warn("Prisma findComment fallback:", e);
+    }
+  }
+  return db.comments.find((c) => c.id === id) ?? null;
+}
+
+// Only the author may edit their own comment.
+export async function updateComment(
+  id: string,
+  actorId: string,
+  content: string
+): Promise<CommentMutationResult> {
+  const db = readDb();
+  const existing = await findComment(id, db);
+  if (!existing) return { ok: false, reason: "not_found" };
+  if (existing.authorId !== actorId) return { ok: false, reason: "forbidden" };
+  // A comment may be text-only, files-only or both — but never neither.
+  if (!content.trim() && !(existing.attachments?.length)) {
+    return { ok: false, reason: "empty" };
+  }
+
+  // `existing` may be the very object stored in db.comments (JSON fallback),
+  // which Object.assign below mutates — so keep the old text now.
+  const previousContent = existing.content;
+  const updated: Comment = {
+    ...existing,
+    content: content.trim(),
+    isEdited: true,
+    updatedAt: new Date(),
+  };
+
+  if (isPrismaEnabled) {
+    try {
+      await prisma.comment.update({
+        where: { id },
+        data: { content: updated.content, isEdited: true },
+      });
+    } catch (e) {
+      console.warn("Prisma updateComment fallback:", e);
+    }
+  }
+
+  // Attachments never change on edit, so leave the local copy's as-is (in
+  // Postgres mode it deliberately holds none — see addComment).
+  const local = db.comments.find((c) => c.id === id);
+  if (local) {
+    const { attachments: _unchanged, ...changes } = updated;
+    Object.assign(local, changes);
+  }
+
+  await notifyCommentRecipients(updated, db, previousContent);
+  writeDb(db);
+  return { ok: true, comment: toPublicComment(updated) };
+}
+
+// Only the author may delete their own comment.
+export async function deleteComment(
+  id: string,
+  actorId: string
+): Promise<CommentMutationResult> {
+  const db = readDb();
+  const existing = await findComment(id, db);
+  if (!existing) return { ok: false, reason: "not_found" };
+  if (existing.authorId !== actorId) return { ok: false, reason: "forbidden" };
+
+  if (isPrismaEnabled) {
+    try {
+      await prisma.comment.delete({ where: { id } });
+    } catch (e) {
+      console.warn("Prisma deleteComment fallback:", e);
+    }
+  }
+
+  db.comments = db.comments.filter((c) => c.id !== id);
+  const task = db.tasks.find((t) => t.id === existing.taskId);
+  if (task) task.commentIds = task.commentIds.filter((cid) => cid !== id);
+
+  writeDb(db);
+  return { ok: true, comment: toPublicComment(existing) };
 }
 
 // ─── Subtasks Operations ────────────────────────────────────────────────────
@@ -2008,6 +2302,36 @@ export async function getPosts(workspaceId: string, viewerId?: string): Promise<
   }
 }
 
+// Creates a Notification for `recipientId` iff they haven't muted that
+// notification type and aren't the one who triggered it (no self-notifying).
+async function createNotificationIfEnabled(params: {
+  recipientId: string;
+  actorId: string;
+  preferenceField: "notifyPostLikes" | "notifyPostComments" | "notifyNewPosts";
+  type: string;
+  title: string;
+  body: string;
+  boardId?: string | null;
+}): Promise<void> {
+  if (params.recipientId === params.actorId) return;
+  try {
+    const recipient = await prisma.user.findUnique({ where: { id: params.recipientId } });
+    if (!recipient || recipient[params.preferenceField] === false) return;
+    await prisma.notification.create({
+      data: {
+        id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        userId: params.recipientId,
+        type: params.type,
+        title: params.title,
+        body: params.body,
+        boardId: params.boardId,
+      },
+    });
+  } catch (e) {
+    console.warn("Failed to create post notification:", e);
+  }
+}
+
 export async function createPost(data: {
   workspaceId: string;
   authorId: string;
@@ -2025,6 +2349,27 @@ export async function createPost(data: {
       },
       include: { comments: true, reactions: true },
     });
+
+    const workspace = await prisma.workspace.findUnique({ where: { id: data.workspaceId } });
+    if (workspace) {
+      const actor = await prisma.user.findUnique({ where: { id: data.authorId } });
+      const memberIds: string[] = (workspace.members as any[]).map((m) => m.userId);
+      await Promise.all(
+        memberIds
+          .filter((id) => id !== data.authorId)
+          .map((id) =>
+            createNotificationIfEnabled({
+              recipientId: id,
+              actorId: data.authorId,
+              preferenceField: "notifyNewPosts",
+              type: "new_post",
+              title: `New post in ${workspace.name}`,
+              body: `${actor?.name || "Someone"}: "${data.content.slice(0, 80)}"`,
+            })
+          )
+      );
+    }
+
     return mapPostRow(row, data.authorId);
   } catch (e) {
     console.warn("Prisma createPost failed:", e);
@@ -2063,6 +2408,19 @@ export async function addPostComment(data: {
       where: { id: data.postId },
       include: { comments: true, reactions: true },
     });
+
+    if (row) {
+      const actor = await prisma.user.findUnique({ where: { id: data.authorId } });
+      await createNotificationIfEnabled({
+        recipientId: row.authorId,
+        actorId: data.authorId,
+        preferenceField: "notifyPostComments",
+        type: "post_comment",
+        title: "New comment on your post",
+        body: `${actor?.name || "Someone"}: "${data.content.slice(0, 80)}"`,
+      });
+    }
+
     return row ? mapPostRow(row, data.authorId) : null;
   } catch (e) {
     console.warn("Prisma addPostComment failed:", e);
@@ -2081,22 +2439,73 @@ export async function setPostReaction(
       where: { postId_userId: { postId, userId } },
     });
 
+    // Only a freshly-set "like" notifies — never dislikes, and never the
+    // toggle-off click (clicking the same reaction again removes it).
+    let shouldNotifyLike = false;
     if (existing && existing.type === type) {
-      // Clicking the same reaction again removes it (toggle off).
       await prisma.postReaction.delete({ where: { id: existing.id } });
     } else if (existing) {
       await prisma.postReaction.update({ where: { id: existing.id }, data: { type } });
+      shouldNotifyLike = type === "like";
     } else {
       await prisma.postReaction.create({ data: { postId, userId, type } });
+      shouldNotifyLike = type === "like";
     }
 
     const row = await prisma.post.findUnique({
       where: { id: postId },
       include: { comments: true, reactions: true },
     });
+
+    if (shouldNotifyLike && row) {
+      const actor = await prisma.user.findUnique({ where: { id: userId } });
+      await createNotificationIfEnabled({
+        recipientId: row.authorId,
+        actorId: userId,
+        preferenceField: "notifyPostLikes",
+        type: "post_like",
+        title: "New like on your post",
+        body: `${actor?.name || "Someone"} liked your post`,
+      });
+    }
+
     return row ? mapPostRow(row, userId) : null;
   } catch (e) {
     console.warn("Prisma setPostReaction failed:", e);
+    return null;
+  }
+}
+
+export async function updateNotificationPreferences(
+  userId: string,
+  updates: Partial<Pick<User, "notifyPostLikes" | "notifyPostComments" | "notifyNewPosts">>
+): Promise<User | null> {
+  if (!isPrismaEnabled) return null;
+  try {
+    const u = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(updates.notifyPostLikes !== undefined && { notifyPostLikes: updates.notifyPostLikes }),
+        ...(updates.notifyPostComments !== undefined && {
+          notifyPostComments: updates.notifyPostComments,
+        }),
+        ...(updates.notifyNewPosts !== undefined && { notifyNewPosts: updates.notifyNewPosts }),
+      },
+    });
+    return {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      avatarInitials: u.avatarInitials,
+      avatarColor: u.avatarColor,
+      role: u.role,
+      isActive: u.isActive,
+      notifyPostLikes: u.notifyPostLikes,
+      notifyPostComments: u.notifyPostComments,
+      notifyNewPosts: u.notifyNewPosts,
+    };
+  } catch (e) {
+    console.warn("Prisma updateNotificationPreferences failed:", e);
     return null;
   }
 }
@@ -2204,6 +2613,290 @@ export async function deleteFile(id: string): Promise<boolean> {
     return true;
   } catch (e) {
     console.warn("Prisma deleteFile failed:", e);
+    return false;
+  }
+}
+
+// ─── Workspace Appointments (shared meetings, unlike private PersonalTodo) ────
+
+function mapAppointmentRow(row: {
+  id: string;
+  workspaceId: string;
+  boardId: string | null;
+  createdById: string;
+  title: string;
+  notes: string | null;
+  startAt: Date;
+  attendeeIds: string[];
+  reminderMinutesBefore: number;
+  isCompleted: boolean;
+  reminderSentAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): WorkspaceAppointment {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    boardId: row.boardId,
+    createdById: row.createdById,
+    title: row.title,
+    notes: row.notes || "",
+    startAt: row.startAt,
+    attendeeIds: row.attendeeIds || [],
+    reminderMinutesBefore: row.reminderMinutesBefore,
+    isCompleted: row.isCompleted,
+    reminderSentAt: row.reminderSentAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export async function getAppointments(workspaceId: string): Promise<WorkspaceAppointment[]> {
+  if (!isPrismaEnabled) return [];
+  try {
+    const rows = await prisma.appointment.findMany({
+      where: { workspaceId },
+      orderBy: { startAt: "asc" },
+    });
+    return rows.map(mapAppointmentRow);
+  } catch (e) {
+    console.warn("Prisma getAppointments failed:", e);
+    return [];
+  }
+}
+
+export async function createAppointment(data: {
+  workspaceId: string;
+  boardId?: string | null;
+  createdById: string;
+  title: string;
+  notes?: string;
+  startAt: Date;
+  attendeeIds?: string[];
+  reminderMinutesBefore?: number;
+}): Promise<WorkspaceAppointment> {
+  if (!isPrismaEnabled) {
+    throw new Error("Appointments are unavailable right now.");
+  }
+  const row = await prisma.appointment.create({
+    data: {
+      workspaceId: data.workspaceId,
+      boardId: data.boardId || null,
+      createdById: data.createdById,
+      title: data.title,
+      notes: data.notes || "",
+      startAt: data.startAt,
+      attendeeIds: data.attendeeIds || [],
+      reminderMinutesBefore: data.reminderMinutesBefore ?? 30,
+    },
+  });
+  return mapAppointmentRow(row);
+}
+
+export async function updateAppointment(
+  id: string,
+  updates: Partial<
+    Pick<
+      WorkspaceAppointment,
+      "title" | "notes" | "startAt" | "attendeeIds" | "reminderMinutesBefore" | "isCompleted"
+    >
+  >
+): Promise<WorkspaceAppointment | null> {
+  if (!isPrismaEnabled) return null;
+  try {
+    const data: Record<string, unknown> = { ...updates };
+    // Editing the time or reminder window re-arms the reminder so it fires again.
+    if (updates.startAt !== undefined || updates.reminderMinutesBefore !== undefined) {
+      data.reminderSentAt = null;
+    }
+    const row = await prisma.appointment.update({ where: { id }, data });
+    return mapAppointmentRow(row);
+  } catch (e) {
+    console.warn("Prisma updateAppointment failed:", e);
+    return null;
+  }
+}
+
+export async function deleteAppointment(id: string): Promise<boolean> {
+  if (!isPrismaEnabled) return false;
+  try {
+    await prisma.appointment.delete({ where: { id } });
+    return true;
+  } catch (e) {
+    console.warn("Prisma deleteAppointment failed:", e);
+    return false;
+  }
+}
+
+// Finds appointments in this workspace whose reminder window has arrived,
+// fires an in-app Notification + email to every attendee, and marks each
+// one sent so it isn't repeated. There's no cron in this app, so this runs
+// whenever a client with this workspace open polls for it; the reminderSentAt
+// claim (via updateMany) keeps two clients polling at once from double-sending.
+export async function checkAndSendAppointmentReminders(
+  workspaceId: string
+): Promise<{ remindedAppointments: WorkspaceAppointment[]; notifications: Notification[] }> {
+  if (!isPrismaEnabled) return { remindedAppointments: [], notifications: [] };
+
+  const [dueCandidates, workspaceRow] = await Promise.all([
+    prisma.appointment.findMany({
+      where: { workspaceId, isCompleted: false, reminderSentAt: null },
+    }),
+    prisma.workspace.findUnique({ where: { id: workspaceId } }),
+  ]);
+  if (!workspaceRow || dueCandidates.length === 0) {
+    return { remindedAppointments: [], notifications: [] };
+  }
+
+  const now = Date.now();
+  const due = dueCandidates.filter((a) => {
+    const startTime = a.startAt.getTime();
+    const reminderTime = startTime - a.reminderMinutesBefore * 60000;
+    // Window stays open a few minutes past start in case nobody had a
+    // client open at the exact reminder moment.
+    return now >= reminderTime && now <= startTime + 5 * 60000;
+  });
+  if (due.length === 0) return { remindedAppointments: [], notifications: [] };
+
+  const memberIds: string[] = (workspaceRow.members as any[]).map((m) => m.userId);
+  const allUsers = await prisma.user.findMany({ where: { id: { in: memberIds } } });
+  const usersById = new Map(allUsers.map((u) => [u.id, u]));
+
+  const remindedAppointments: WorkspaceAppointment[] = [];
+  const createdNotifications: Notification[] = [];
+
+  for (const appt of due) {
+    // Atomically claim this appointment so a second client polling at the
+    // same moment doesn't also send the notifications/emails below.
+    const claim = await prisma.appointment.updateMany({
+      where: { id: appt.id, reminderSentAt: null },
+      data: { reminderSentAt: new Date() },
+    });
+    if (claim.count === 0) continue;
+
+    const attendeeIds = appt.attendeeIds.length > 0 ? appt.attendeeIds : memberIds;
+    const startLabel = appt.startAt.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    for (const attendeeId of attendeeIds) {
+      const user = usersById.get(attendeeId);
+      if (!user) continue;
+
+      try {
+        const notif = await prisma.notification.create({
+          data: {
+            id: `notif-appt-${appt.id}-${attendeeId}`,
+            userId: attendeeId,
+            type: "appointment_reminder",
+            title: `Upcoming: ${appt.title}`,
+            body: `Starts at ${startLabel}`,
+            taskId: null,
+            boardId: appt.boardId,
+          },
+        });
+        createdNotifications.push({
+          id: notif.id,
+          userId: notif.userId,
+          type: notif.type as any,
+          title: notif.title,
+          body: notif.body,
+          taskId: notif.taskId,
+          boardId: notif.boardId,
+          isRead: notif.isRead,
+          createdAt: notif.createdAt,
+        });
+      } catch (e) {
+        console.warn("Failed to create appointment notification:", e);
+      }
+
+      sendAppointmentReminderEmail({
+        to: user.email,
+        recipientName: user.name,
+        workspaceName: workspaceRow.name,
+        title: appt.title,
+        notes: appt.notes || undefined,
+        startAt: appt.startAt,
+      }).catch((e) => console.warn("Failed to send appointment reminder email:", e));
+    }
+
+    const updated = await prisma.appointment.findUnique({ where: { id: appt.id } });
+    if (updated) remindedAppointments.push(mapAppointmentRow(updated));
+  }
+
+  return { remindedAppointments, notifications: createdNotifications };
+}
+
+// ─── Dashboards (saved analytics report views over a workspace) ───────────
+
+function mapDashboardRow(row: {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description: string | null;
+  widgets: string[];
+  createdById: string;
+  createdAt: Date;
+  updatedAt: Date;
+}): Dashboard {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    name: row.name,
+    description: row.description || "",
+    widgets: (row.widgets || []) as DashboardWidgetId[],
+    createdById: row.createdById,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export async function getDashboards(workspaceId?: string): Promise<Dashboard[]> {
+  if (!isPrismaEnabled) return [];
+  try {
+    const rows = await prisma.dashboard.findMany({
+      where: workspaceId ? { workspaceId } : undefined,
+      orderBy: { createdAt: "asc" },
+    });
+    return rows.map(mapDashboardRow);
+  } catch (e) {
+    console.warn("Prisma getDashboards failed:", e);
+    return [];
+  }
+}
+
+export async function createDashboard(data: {
+  workspaceId: string;
+  name: string;
+  description?: string;
+  widgets?: DashboardWidgetId[];
+  createdById: string;
+}): Promise<Dashboard> {
+  if (!isPrismaEnabled) {
+    throw new Error("Dashboards are unavailable right now.");
+  }
+  const row = await prisma.dashboard.create({
+    data: {
+      workspaceId: data.workspaceId,
+      name: data.name,
+      description: data.description || "",
+      widgets: data.widgets && data.widgets.length > 0
+        ? data.widgets
+        : ["kpis", "distribution", "workload", "trend"],
+      createdById: data.createdById,
+    },
+  });
+  return mapDashboardRow(row);
+}
+
+export async function deleteDashboard(id: string): Promise<boolean> {
+  if (!isPrismaEnabled) return false;
+  try {
+    await prisma.dashboard.delete({ where: { id } });
+    return true;
+  } catch (e) {
+    console.warn("Prisma deleteDashboard failed:", e);
     return false;
   }
 }

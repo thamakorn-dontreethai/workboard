@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getBoards, createBoard } from "@/lib/server/db";
+import { authorizeWorkspaceManage } from "@/lib/server/permissions";
 
 export async function GET() {
   try {
@@ -23,12 +24,15 @@ export async function POST(request: Request) {
       );
     }
 
+    const auth = await authorizeWorkspaceManage(request, body.workspaceId);
+    if (!auth.ok) return auth.response;
+
     const newBoard = await createBoard({
       name: body.name,
       description: body.description,
       type: body.type,
       color: body.color,
-      ownerId: body.ownerId,
+      ownerId: auth.userId,
       workspaceId: body.workspaceId,
       privacy: body.privacy,
     });

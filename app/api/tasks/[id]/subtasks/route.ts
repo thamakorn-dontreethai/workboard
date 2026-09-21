@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSubtasks, addSubtask, toggleSubtask } from "@/lib/server/db";
+import { authorizeTask, authorizeSubtask } from "@/lib/server/permissions";
 
 export async function GET(
   request: Request,
@@ -31,6 +32,9 @@ export async function POST(
       );
     }
 
+    const auth = await authorizeTask(request, id, "write");
+    if (!auth.ok) return auth.response;
+
     const subtask = await addSubtask({
       taskId: id,
       title: body.title,
@@ -54,6 +58,9 @@ export async function PATCH(request: Request) {
         { status: 400 }
       );
     }
+
+    const auth = await authorizeSubtask(request, body.subtaskId, "write");
+    if (!auth.ok) return auth.response;
 
     const updated = await toggleSubtask(body.subtaskId);
     if (!updated) {

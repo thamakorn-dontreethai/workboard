@@ -31,11 +31,61 @@ import {
   X,
 } from "lucide-react";
 
-interface MondayTableProps {
-  boardId: string;
+// A task with no assignee is matched against this sentinel when "Unassigned"
+// is checked in the Person filter — real user ids never collide with it.
+export const UNASSIGNED_FILTER_ID = "__unassigned__";
+
+export type MondayTableSortBy = "manual" | "dueDate" | "priority" | "status" | "title";
+export type MondayTableColumn = "person" | "status" | "date";
+
+export interface MondayTableFilters {
+  searchQuery: string;
+  personIds: string[];
+  statusFilter: TaskStatus[];
+  priorityFilter: TaskPriority[];
+  sortBy: MondayTableSortBy;
+  sortDir: "asc" | "desc";
+  hiddenColumns: Set<MondayTableColumn>;
 }
 
-export function MondayTable({ boardId }: MondayTableProps) {
+const DEFAULT_FILTERS: MondayTableFilters = {
+  searchQuery: "",
+  personIds: [],
+  statusFilter: [],
+  priorityFilter: [],
+  sortBy: "manual",
+  sortDir: "asc",
+  hiddenColumns: new Set(),
+};
+
+const PRIORITY_RANK: Record<TaskPriority, number> = {
+  urgent: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  none: 4,
+};
+
+const STATUS_RANK: Record<TaskStatus, number> = {
+  new_request: 0,
+  planning: 1,
+  todo: 2,
+  in_progress: 3,
+  in_review: 4,
+  on_hold: 5,
+  blocked: 6,
+  approved: 7,
+  done: 8,
+  cancelled: 9,
+};
+
+interface MondayTableProps {
+  boardId: string;
+  filters?: Partial<MondayTableFilters>;
+}
+
+export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps) {
+  const filters: MondayTableFilters = { ...DEFAULT_FILTERS, ...filtersProp };
   const {
     groups,
     tasks,
@@ -55,6 +105,7 @@ export function MondayTable({ boardId }: MondayTableProps) {
     toggleGroupCollapse,
     addGroup,
     updateGroup,
+    canDo,
     reorderGroups,
     openTaskModal,
     comments,
@@ -63,15 +114,19 @@ export function MondayTable({ boardId }: MondayTableProps) {
   const boardGroups = groups
     .filter((g) => g.boardId === boardId)
     .sort((a, b) => a.order - b.order);
+  // Creating/deleting/renaming/moving work and assigning people is leader-only
+  // (owner/admin); members can still update status on items assigned to them.
+  // The API enforces the same rules — this just hides/disables what won't work.
+  const canManage = canDo("manage", boardId);
   const [newRowTitles, setNewRowTitles] = useState<Record<string, string>>({});
   const [activeStatusPopoverTaskId, setActiveStatusPopoverTaskId] = useState<
     string | null
   >(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
-  const [newGroupName, setNewGroupName] = useState("");
-  const [isAddingGroup, setIsAddingGroup] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [groupNameInput, setGroupNameInput] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
+  const [isAddingGroup, setIsAddingGroup] = useState(false);
   const [colorPickerGroupId, setColorPickerGroupId] = useState<string | null>(null);
   const colorButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   // Clicking a task's title renames it inline (same pattern as group
@@ -160,6 +215,7 @@ export function MondayTable({ boardId }: MondayTableProps) {
   };
 
   const startEditingGroupName = (group: Group) => {
+    if (!canManage) return;
     setEditingGroupId(group.id);
     setGroupNameInput(group.name);
   };
@@ -190,6 +246,7 @@ export function MondayTable({ boardId }: MondayTableProps) {
   }, [lastCreatedTaskId]);
 
   const startEditingTaskTitle = (task: Task) => {
+    if (!canManage) return;
     setEditingTaskId(task.id);
     setTaskTitleInput(task.title);
   };
@@ -225,7 +282,7 @@ export function MondayTable({ boardId }: MondayTableProps) {
     e: React.PointerEvent<HTMLElement>,
     task: Task
   ) => {
-    if (e.button !== 0) return; // left click / primary touch only
+    if (e.button !== 0 || !canManage) return; // left click / primary touch only; leaders only
     const target = e.target as HTMLElement;
     // The row's "⋯" button is deliberately exempted from the exclusion
     // list below — it's dual-purpose: a plain click opens its menu (we
@@ -318,7 +375,7 @@ export function MondayTable({ boardId }: MondayTableProps) {
     e: React.PointerEvent<HTMLElement>,
     group: Group
   ) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || !canManage) return;
     const target = e.target as HTMLElement;
     if (
       !target.closest("[data-group-drag-handle]") &&
@@ -437,12 +494,60 @@ export function MondayTable({ boardId }: MondayTableProps) {
     "approved",
   ];
 
+  const getGroupTasks = (groupId: string): Task[] => {
+    let list = tasks.filter((t) => t.groupId === groupId && !t.isArchived);
+
+    if (filters.searchQuery.trim()) {
+      const q = filters.searchQuery.trim().toLowerCase();
+      list = list.filter((t) => t.title.toLowerCase().includes(q));
+    }
+    if (filters.personIds.length > 0) {
+      list = list.filter((t) =>
+        t.assigneeIds.length > 0
+          ? t.assigneeIds.some((id) => filters.personIds.includes(id))
+          : filters.personIds.includes(UNASSIGNED_FILTER_ID)
+      );
+    }
+    if (filters.statusFilter.length > 0) {
+      list = list.filter((t) => filters.statusFilter.includes(t.status));
+    }
+    if (filters.priorityFilter.length > 0) {
+      list = list.filter((t) => filters.priorityFilter.includes(t.priority));
+    }
+
+    const dir = filters.sortDir === "desc" ? -1 : 1;
+    switch (filters.sortBy) {
+      case "dueDate":
+        return [...list].sort((a, b) => {
+          const at = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+          const bt = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+          return (at - bt) * dir;
+        });
+      case "priority":
+        return [...list].sort(
+          (a, b) => (PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]) * dir
+        );
+      case "status":
+        return [...list].sort(
+          (a, b) => (STATUS_RANK[a.status] - STATUS_RANK[b.status]) * dir
+        );
+      case "title":
+        return [...list].sort((a, b) => a.title.localeCompare(b.title) * dir);
+      default:
+        return [...list].sort((a, b) => a.order - b.order);
+    }
+  };
+
+  const showPersonColumn = !filters.hiddenColumns.has("person");
+  const showStatusColumn = !filters.hiddenColumns.has("status");
+  const showDateColumn = !filters.hiddenColumns.has("date");
+  const visibleOptionalColumnCount =
+    Number(showPersonColumn) + Number(showStatusColumn) + Number(showDateColumn);
+
   return (
     <div className="space-y-8 pb-16 select-none font-sans">
       {boardGroups.map((group) => {
-        const groupTasks = tasks
-          .filter((t) => t.groupId === group.id && !t.isArchived)
-          .sort((a, b) => a.order - b.order);
+        const groupTasks = getGroupTasks(group.id);
 
         const isDropBefore =
           groupDropTarget?.groupId === group.id && groupDropTarget.position === "before";
@@ -484,12 +589,15 @@ export function MondayTable({ boardId }: MondayTableProps) {
                   }}
                   data-group-drag-handle
                   type="button"
+                  disabled={!canManage}
                   onClick={(e) => {
                     e.stopPropagation();
                     setGroupMenuId(groupMenuId === group.id ? null : group.id);
                   }}
                   title="Click for group options, or press and drag to reorder"
-                  className="flex items-center justify-center h-6 w-6 my-auto ml-2 shrink-0 rounded text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                  className={`flex items-center justify-center h-6 w-6 my-auto ml-2 shrink-0 rounded text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer ${
+                    canManage ? "" : "invisible"
+                  }`}
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" />
                 </button>
@@ -592,11 +700,14 @@ export function MondayTable({ boardId }: MondayTableProps) {
                   }}
                   data-group-drag-handle
                   type="button"
+                  disabled={!canManage}
                   onClick={() =>
                     setGroupMenuId(groupMenuId === group.id ? null : group.id)
                   }
                   title="Click for group options, or press and drag to reorder"
-                  className="flex items-center justify-center h-6 w-6 rounded text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors shrink-0 cursor-pointer"
+                  className={`flex items-center justify-center h-6 w-6 rounded text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors shrink-0 cursor-pointer ${
+                    canManage ? "" : "invisible"
+                  }`}
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" />
                 </button>
@@ -756,18 +867,20 @@ export function MondayTable({ boardId }: MondayTableProps) {
               </div>
 
               <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (confirm(`Delete group "${group.name}"?`)) {
-                      deleteGroup(group.id);
-                    }
-                  }}
-                  title="Delete group"
-                  className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors text-xs"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm(`Delete group "${group.name}"?`)) {
+                        deleteGroup(group.id);
+                      }
+                    }}
+                    title="Delete group"
+                    className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors text-xs"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -792,30 +905,38 @@ export function MondayTable({ boardId }: MondayTableProps) {
                         style={{ backgroundColor: group.color || "#0073ea" }}
                       />
                       <th className="w-9 px-2.5 py-2 text-center">
-                        <input
-                          type="checkbox"
-                          checked={
-                            groupTasks.length > 0 &&
-                            groupTasks.every((t) =>
-                              selectedTaskIds.includes(t.id)
-                            )
-                          }
-                          onChange={() => toggleSelectAll(groupTasks)}
-                          className="rounded border-zinc-700 bg-zinc-900 cursor-pointer"
-                        />
+                        {canManage && (
+                          <input
+                            type="checkbox"
+                            checked={
+                              groupTasks.length > 0 &&
+                              groupTasks.every((t) =>
+                                selectedTaskIds.includes(t.id)
+                              )
+                            }
+                            onChange={() => toggleSelectAll(groupTasks)}
+                            className="rounded border-zinc-700 bg-zinc-900 cursor-pointer"
+                          />
+                        )}
                       </th>
                       <th className="px-3 py-2 text-zinc-300 font-medium min-w-[260px] border-l border-zinc-800">
                         Item
                       </th>
-                      <th className="px-3 py-2 w-32 text-center text-zinc-300 font-medium border-l border-zinc-800">
-                        Person
-                      </th>
-                      <th className="px-3 py-2 w-40 text-center text-zinc-300 font-medium border-l border-zinc-800">
-                        Status
-                      </th>
-                      <th className="px-3 py-2 w-36 text-center text-zinc-300 font-medium border-l border-zinc-800">
-                        Date
-                      </th>
+                      {showPersonColumn && (
+                        <th className="px-3 py-2 w-32 text-center text-zinc-300 font-medium border-l border-zinc-800">
+                          Person
+                        </th>
+                      )}
+                      {showStatusColumn && (
+                        <th className="px-3 py-2 w-40 text-center text-zinc-300 font-medium border-l border-zinc-800">
+                          Status
+                        </th>
+                      )}
+                      {showDateColumn && (
+                        <th className="px-3 py-2 w-36 text-center text-zinc-300 font-medium border-l border-zinc-800">
+                          Date
+                        </th>
+                      )}
                       <th className="w-10 px-2 py-2 text-center text-zinc-500 border-l border-zinc-800">
                         <Plus className="h-3.5 w-3.5 mx-auto" />
                       </th>
@@ -865,12 +986,14 @@ export function MondayTable({ boardId }: MondayTableProps) {
 
                           {/* Checkbox */}
                           <td className="px-2.5 py-2 text-center">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => toggleSelectTask(task.id)}
-                              className="rounded border-zinc-700 bg-zinc-900 cursor-pointer"
-                            />
+                            {canManage && (
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleSelectTask(task.id)}
+                                className="rounded border-zinc-700 bg-zinc-900 cursor-pointer"
+                              />
+                            )}
                           </td>
 
                           {/* Item Title + Comment Bubble */}
@@ -916,37 +1039,45 @@ export function MondayTable({ boardId }: MondayTableProps) {
                           </td>
 
                           {/* Person / Owner Avatar */}
-                          <td className="px-3 py-1.5 text-center border-l border-zinc-800/60">
-                            <div className="flex justify-center">
-                              <AssigneeSelect
-                                currentAssigneeId={task.assigneeId}
-                                onAssign={(newUid) => assignTask(task.id, newUid)}
-                                boardId={boardId}
-                                size="sm"
-                                showLabel={false}
-                              />
-                            </div>
-                          </td>
+                          {showPersonColumn && (
+                            <td className="px-3 py-1.5 text-center border-l border-zinc-800/60">
+                              <div className="flex justify-center">
+                                <AssigneeSelect
+                                  currentAssigneeIds={task.assigneeIds}
+                                  onAssign={(newUids) => assignTask(task.id, newUids)}
+                                  boardId={boardId}
+                                  size="sm"
+                                  showLabel={false}
+                                />
+                              </div>
+                            </td>
+                          )}
 
                           {/* Status Block */}
-                          <td className="px-2 py-1 text-center border-l border-zinc-800/60">
-                            <StatusDropdown
-                              currentStatus={task.status}
-                              onStatusChange={(newStatus) =>
-                                updateTaskStatus(task.id, newStatus)
-                              }
-                            />
-                          </td>
+                          {showStatusColumn && (
+                            <td className="px-2 py-1 text-center border-l border-zinc-800/60">
+                              <StatusDropdown
+                                disabled={!canDo("status", boardId, task)}
+                                currentStatus={task.status}
+                                onStatusChange={(newStatus) =>
+                                  updateTaskStatus(task.id, newStatus)
+                                }
+                              />
+                            </td>
+                          )}
 
                           {/* Date */}
-                          <td className="px-3 py-1.5 border-l border-zinc-800/60">
-                            <DatePicker
-                              currentDate={task.dueDate}
-                              onDateChange={(newDate) =>
-                                updateTaskField(task.id, "dueDate", newDate)
-                              }
-                            />
-                          </td>
+                          {showDateColumn && (
+                            <td className="px-3 py-1.5 border-l border-zinc-800/60">
+                              <DatePicker
+                                disabled={!canManage}
+                                currentDate={task.dueDate}
+                                onDateChange={(newDate) =>
+                                  updateTaskField(task.id, "dueDate", newDate)
+                                }
+                              />
+                            </td>
+                          )}
 
                           {/* Add button placeholder */}
                           <td className="border-l border-zinc-800/60" />
@@ -955,7 +1086,8 @@ export function MondayTable({ boardId }: MondayTableProps) {
                     })}
 
                     {/* Inline "+ Add item" Row */}
-                    <tr className="bg-transparent hover:bg-zinc-800/30 transition-colors">
+                    {canManage && (
+<tr className="bg-transparent hover:bg-zinc-800/30 transition-colors">
                       <td
                         className="w-1.5 p-0"
                         style={{ backgroundColor: group.color || "#0073ea" }}
@@ -963,7 +1095,10 @@ export function MondayTable({ boardId }: MondayTableProps) {
                       <td className="px-2.5 py-2 text-center text-zinc-500">
                         <Plus className="h-3.5 w-3.5 mx-auto" />
                       </td>
-                      <td colSpan={5} className="px-3 py-1.5 border-l border-zinc-800/60">
+                      <td
+                        colSpan={2 + visibleOptionalColumnCount}
+                        className="px-3 py-1.5 border-l border-zinc-800/60"
+                      >
                         <form
                           onSubmit={(e) => handleAddRow(group.id, e)}
                           className="flex items-center gap-2"
@@ -991,6 +1126,7 @@ export function MondayTable({ boardId }: MondayTableProps) {
                         </form>
                       </td>
                     </tr>
+)}
                   </tbody>
 
                   {/* Group Summary Footer Row with Segmented Bar */}
@@ -1098,53 +1234,12 @@ export function MondayTable({ boardId }: MondayTableProps) {
           document.body
         )}
 
-      {/* "+ add new group" Button at bottom */}
-      <div className="pt-2">
-        {isAddingGroup ? (
-          <form
-            onSubmit={handleCreateGroup}
-            className="flex items-center gap-2 max-w-sm rounded-xl border border-zinc-700 bg-[#1e202c] p-2 shadow-sm"
-          >
-            <input
-              type="text"
-              autoFocus
-              value={newGroupName}
-              onChange={(e) => setNewGroupName(e.target.value)}
-              placeholder="Group name..."
-              className="flex-1 bg-transparent px-2.5 py-1 text-xs text-white focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={!newGroupName.trim()}
-              className="rounded-lg bg-[#0073ea] px-3 py-1 text-xs font-semibold text-white hover:bg-[#0060c0] disabled:opacity-50"
-            >
-              Add Group
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsAddingGroup(false)}
-              className="px-2 py-1 text-xs text-zinc-400 hover:text-white"
-            >
-              Cancel
-            </button>
-          </form>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setIsAddingGroup(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-zinc-700/80 px-3.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-white hover:border-zinc-500 transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>+ add new group</span>
-          </button>
-        )}
-      </div>
-
       {/* Floating row "⋯" handle — portaled to document.body and fixed-
           positioned off the left edge of whichever row is active (hovered,
           or with its menu open), instead of living inside the table where
           the horizontal-scroll wrapper would clip it. */}
-      {portalMounted &&
+      {canManage &&
+        portalMounted &&
         rowHandlePos &&
         (() => {
           const activeRowId = rowMenuTaskId || hoveredTaskId;

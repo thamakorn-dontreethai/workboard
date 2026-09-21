@@ -4,10 +4,11 @@ import React, { useRef, useState } from "react";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 import { Check, UserX, Search, ChevronDown, User as UserIcon, UserPlus } from "lucide-react";
 import { FloatingPanel } from "@/components/board/FloatingPanel";
+import { getBoardMemberIds } from "@/lib/utils/boardMembers";
 
 interface AssigneeSelectProps {
-  currentAssigneeId: string | null;
-  onAssign: (userId: string | null) => void;
+  currentAssigneeIds: string[];
+  onAssign: (userIds: string[]) => void;
   boardId?: string;
   size?: "sm" | "md" | "lg";
   align?: "left" | "right";
@@ -16,7 +17,7 @@ interface AssigneeSelectProps {
 }
 
 export function AssigneeSelect({
-  currentAssigneeId,
+  currentAssigneeIds,
   onAssign,
   boardId,
   size = "md",
@@ -24,23 +25,23 @@ export function AssigneeSelect({
   showLabel = true,
   disabled = false,
 }: AssigneeSelectProps) {
-  const { users, boards, openInviteBoardModal } = useWorkBoard();
+  const { users, boards, workspaces, canDo, openInviteBoardModal } = useWorkBoard();
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  const currentAssignee = currentAssigneeId
-    ? users.find((u) => u.id === currentAssigneeId)
-    : null;
+  // Assigning work is leader-only. Members still see who it's assigned to,
+  // but the picker won't open (the API refuses it too).
+  const isReadOnly = disabled || (Boolean(boardId) && !canDo("manage", boardId!));
 
-  // Filter members strictly to this specific board's team if boardId is provided
+  const currentAssignees = currentAssigneeIds
+    .map((id) => users.find((u) => u.id === id))
+    .filter((u): u is (typeof users)[number] => Boolean(u));
+
+  // Limit to this board's team (workspace members + explicit board members)
+  // when a boardId is provided.
   const board = boardId ? boards.find((b) => b.id === boardId) : null;
-  const allowedMemberIds =
-    board?.memberIds && board.memberIds.length > 0
-      ? board.memberIds
-      : board
-      ? [board.ownerId]
-      : null;
+  const allowedMemberIds = board ? getBoardMemberIds(board, workspaces) : null;
 
   const eligibleUsers = allowedMemberIds
     ? users.filter((u) => allowedMemberIds.includes(u.id))
@@ -55,8 +56,16 @@ export function AssigneeSelect({
     );
   });
 
-  const handleSelect = (userId: string | null) => {
-    onAssign(userId);
+  const toggleUser = (userId: string) => {
+    onAssign(
+      currentAssigneeIds.includes(userId)
+        ? currentAssigneeIds.filter((id) => id !== userId)
+        : [...currentAssigneeIds, userId]
+    );
+  };
+
+  const clearAll = () => {
+    onAssign([]);
     setIsOpen(false);
     setSearch("");
   };
@@ -73,29 +82,54 @@ export function AssigneeSelect({
     lg: "h-7 w-7 text-xs",
   };
 
+  const MAX_VISIBLE_AVATARS = 3;
+  const visibleAssignees = currentAssignees.slice(0, MAX_VISIBLE_AVATARS);
+  const overflowCount = currentAssignees.length - visibleAssignees.length;
+
   return (
     <div className="inline-block">
       <button
         ref={buttonRef}
         type="button"
-        disabled={disabled}
+        disabled={isReadOnly}
         onClick={() => setIsOpen(!isOpen)}
         className={`group flex items-center rounded-lg border border-border/80 bg-background/80 hover:bg-accent/60 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
           sizeClasses[size]
-        } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+        } ${
+          disabled
+            ? "opacity-50 cursor-not-allowed"
+            : isReadOnly
+            ? "cursor-default"
+            : "cursor-pointer"
+        }`}
       >
-        {currentAssignee ? (
+        {currentAssignees.length > 0 ? (
           <>
-            <div
-              className={`flex shrink-0 items-center justify-center rounded-full font-semibold text-white ${
-                currentAssignee.avatarColor || "bg-primary"
-              } ${avatarSizes[size]}`}
-            >
-              {currentAssignee.avatarInitials}
+            <div className="flex items-center -space-x-1.5">
+              {visibleAssignees.map((assignee) => (
+                <div
+                  key={assignee.id}
+                  title={assignee.name}
+                  className={`flex shrink-0 items-center justify-center rounded-full font-semibold text-white ring-2 ring-background ${
+                    assignee.avatarColor || "bg-primary"
+                  } ${avatarSizes[size]}`}
+                >
+                  {assignee.avatarInitials}
+                </div>
+              ))}
+              {overflowCount > 0 && (
+                <div
+                  className={`flex shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-muted-foreground ring-2 ring-background ${avatarSizes[size]}`}
+                >
+                  +{overflowCount}
+                </div>
+              )}
             </div>
             {showLabel && (
               <span className="font-medium text-foreground truncate max-w-[130px]">
-                {currentAssignee.name}
+                {currentAssignees.length === 1
+                  ? currentAssignees[0].name
+                  : `${currentAssignees.length} people`}
               </span>
             )}
           </>
@@ -140,12 +174,12 @@ export function AssigneeSelect({
         </div>
 
         <div className="max-h-60 overflow-y-auto p-1 space-y-0.5">
-          {/* Unassign option */}
+          {/* Unassign / clear-all option */}
           <button
             type="button"
-            onClick={() => handleSelect(null)}
+            onClick={clearAll}
             className={`w-full flex items-center justify-between rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors ${
-              !currentAssigneeId ? "bg-accent/60 font-medium" : ""
+              currentAssigneeIds.length === 0 ? "bg-accent/60 font-medium" : ""
             }`}
           >
             <div className="flex items-center gap-2">
@@ -154,7 +188,9 @@ export function AssigneeSelect({
               </div>
               <span>Unassigned</span>
             </div>
-            {!currentAssigneeId && <Check className="h-3.5 w-3.5 text-primary" />}
+            {currentAssigneeIds.length === 0 && (
+              <Check className="h-3.5 w-3.5 text-primary" />
+            )}
           </button>
 
           <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
@@ -170,12 +206,12 @@ export function AssigneeSelect({
             </div>
           ) : (
             filteredUsers.map((user) => {
-              const isSelected = user.id === currentAssigneeId;
+              const isSelected = currentAssigneeIds.includes(user.id);
               return (
                 <button
                   key={user.id}
                   type="button"
-                  onClick={() => handleSelect(user.id)}
+                  onClick={() => toggleUser(user.id)}
                   className={`w-full flex items-center justify-between rounded-lg px-2 py-1.5 text-xs transition-colors ${
                     isSelected
                       ? "bg-primary/10 text-primary font-medium"
@@ -199,9 +235,15 @@ export function AssigneeSelect({
                       </div>
                     </div>
                   </div>
-                  {isSelected && (
-                    <Check className="h-3.5 w-3.5 text-primary shrink-0 ml-2" />
-                  )}
+                  <div
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ml-2 transition-colors ${
+                      isSelected
+                        ? "bg-primary border-primary"
+                        : "border-border bg-transparent"
+                    }`}
+                  >
+                    {isSelected && <Check className="h-3 w-3 text-primary-foreground" />}
+                  </div>
                 </button>
               );
             })

@@ -20,6 +20,8 @@ import {
   assignTask,
   deleteTask,
   addComment,
+  updateComment,
+  deleteComment,
   getComments,
   addSubtask,
   toggleSubtask,
@@ -112,8 +114,8 @@ describe("Database & Server Layer Tests", () => {
     expect(updated?.status).toBe("in_progress");
 
     // Assign to Sarah Chen (user-2)
-    const assigned = await assignTask(task.id, "user-2", "user-1");
-    expect(assigned?.assigneeId).toBe("user-2");
+    const assigned = await assignTask(task.id, ["user-2"], "user-1");
+    expect(assigned?.assigneeIds).toContain("user-2");
 
     // Check activity log
     const activities = await getActivities(task.id);
@@ -123,6 +125,84 @@ describe("Database & Server Layer Tests", () => {
     // Check notification sent to user-2
     const notifs = await getNotifications("user-2");
     expect(notifs.some((n) => n.taskId === task.id && n.type === "assignment")).toBe(true);
+  });
+
+  it("should edit and delete a comment, but only for its author", async () => {
+    const task = await createTask({ title: "Edit me", boardId: "board-1", groupId: "group-1" });
+    const comment = await addComment({
+      taskId: task.id,
+      authorId: "user-somchai",
+      content: "first draft",
+    });
+
+    const stranger = await updateComment(comment.id, "user-thamakhorn", "hijacked");
+    expect(stranger).toEqual({ ok: false, reason: "forbidden" });
+
+    const edited = await updateComment(comment.id, "user-somchai", "  final version ");
+    expect(edited.ok).toBe(true);
+    if (edited.ok) {
+      expect(edited.comment.content).toBe("final version");
+      expect(edited.comment.isEdited).toBe(true);
+    }
+    expect((await getComments(task.id))[0].content).toBe("final version");
+
+    expect(await deleteComment(comment.id, "user-thamakhorn")).toEqual({
+      ok: false,
+      reason: "forbidden",
+    });
+    expect((await deleteComment(comment.id, "user-somchai")).ok).toBe(true);
+    expect(await getComments(task.id)).toHaveLength(0);
+    expect(readDb().tasks.find((t) => t.id === task.id)!.commentIds).not.toContain(comment.id);
+    expect(await deleteComment(comment.id, "user-somchai")).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+  });
+
+  it("should notify @mentioned users and assignees, never the author", async () => {
+    const task = await createTask({
+      title: "Launch plan",
+      boardId: "board-1",
+      groupId: "group-1",
+      assigneeIds: ["user-1789025805350"],
+    } as any);
+
+    await addComment({
+      taskId: task.id,
+      authorId: "user-somchai",
+      content: "@Thamakhorn please review, @Somchai is me",
+    });
+
+    const mentioned = await getNotifications("user-thamakhorn");
+    expect(mentioned.some((n) => n.taskId === task.id && n.type === "mention")).toBe(true);
+
+    const assignee = await getNotifications("user-1789025805350");
+    expect(assignee.some((n) => n.taskId === task.id && n.type === "comment")).toBe(true);
+
+    const author = await getNotifications("user-somchai");
+    expect(author.some((n) => n.taskId === task.id)).toBe(false);
+  });
+
+  it("should only notify newly added mentions when a comment is edited", async () => {
+    const task = await createTask({ title: "Re-ping", boardId: "board-1", groupId: "group-1" });
+    const comment = await addComment({
+      taskId: task.id,
+      authorId: "user-somchai",
+      content: "@Thamakhorn hello",
+    });
+    const before = (await getNotifications("user-thamakhorn")).filter(
+      (n) => n.taskId === task.id
+    ).length;
+
+    await updateComment(comment.id, "user-somchai", "@Thamakhorn hello, typo fixed");
+    const afterTypo = (await getNotifications("user-thamakhorn")).filter(
+      (n) => n.taskId === task.id
+    ).length;
+    expect(afterTypo).toBe(before);
+
+    await updateComment(comment.id, "user-somchai", "@Thamakhorn hello, cc @Tha Don");
+    const newlyMentioned = await getNotifications("user-1789025805350");
+    expect(newlyMentioned.some((n) => n.taskId === task.id && n.type === "mention")).toBe(true);
   });
 
   it("should post comments and toggle subtasks", async () => {

@@ -13,6 +13,8 @@ import {
   Check,
   ArrowLeft,
   Filter,
+  ThumbsUp,
+  Megaphone,
 } from "lucide-react";
 
 export default function InboxPage() {
@@ -143,6 +145,12 @@ export default function InboxPage() {
                       ? "bg-purple-500/10 text-purple-500"
                       : n.type === "assignment"
                       ? "bg-blue-500/10 text-blue-500"
+                      : n.type === "post_like"
+                      ? "bg-rose-500/10 text-rose-500"
+                      : n.type === "post_comment"
+                      ? "bg-sky-500/10 text-sky-500"
+                      : n.type === "new_post"
+                      ? "bg-amber-500/10 text-amber-500"
                       : "bg-emerald-500/10 text-emerald-500"
                   }`}
                 >
@@ -150,6 +158,12 @@ export default function InboxPage() {
                     <MessageSquare className="h-4 w-4" />
                   ) : n.type === "assignment" ? (
                     <UserCheck className="h-4 w-4" />
+                  ) : n.type === "post_like" ? (
+                    <ThumbsUp className="h-4 w-4" />
+                  ) : n.type === "post_comment" ? (
+                    <MessageSquare className="h-4 w-4" />
+                  ) : n.type === "new_post" ? (
+                    <Megaphone className="h-4 w-4" />
                   ) : (
                     <Bell className="h-4 w-4" />
                   )}

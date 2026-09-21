@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 import {
   TASK_STATUS_CONFIG,
@@ -9,10 +9,18 @@ import {
   TaskPriority,
 } from "@/types";
 import { AssigneeSelect } from "@/components/common/AssigneeSelect";
-import { formatDate } from "@/lib/utils/date";
+import { getBoardMemberIds } from "@/lib/utils/boardMembers";
+import { formatDate, formatRelativeDate } from "@/lib/utils/date";
+import {
+  INLINE_IMAGE_TYPES,
+  MAX_ATTACHMENTS_PER_COMMENT,
+  formatBytes,
+  validateAttachments,
+} from "@/lib/utils/commentAttachments";
 import {
   X,
   Trash2,
+  Pencil,
   Calendar,
   Clock,
   MessageSquare,
@@ -22,8 +30,6 @@ import {
   Send,
   AtSign,
   Paperclip,
-  Smile,
-  PenTool,
   Info as InfoIcon,
   FileText,
   Tag,
@@ -40,6 +46,7 @@ export function MondaySlideOver() {
     boards,
     groups,
     users,
+    workspaces,
     subtasks,
     comments,
     activities,
@@ -53,6 +60,9 @@ export function MondaySlideOver() {
     toggleSubtask,
     addSubtask,
     addComment,
+    editComment,
+    deleteComment,
+    canDo,
   } = useWorkBoard();
 
   const task = tasks.find((t) => t.id === activeTaskId);
@@ -60,8 +70,20 @@ export function MondaySlideOver() {
   const group = task ? groups.find((g) => g.id === task.groupId) : null;
 
   const taskSubtasks = subtasks.filter((s) => s.taskId === activeTaskId);
-  const taskComments = comments.filter((c) => c.taskId === activeTaskId);
+  // Newest first, so the latest update is right under the composer.
+  const taskComments = comments
+    .filter((c) => c.taskId === activeTaskId)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const taskActivities = activities.filter((a) => a.taskId === activeTaskId);
+
+  // People that can be @mentioned: the board's team, falling back to
+  // everyone if it can't be resolved.
+  const mentionables = useMemo(() => {
+    if (!board) return users;
+    const ids = new Set(getBoardMemberIds(board, workspaces));
+    const members = users.filter((u) => ids.has(u.id));
+    return members.length > 0 ? members : users;
+  }, [board, users, workspaces]);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -70,6 +92,17 @@ export function MondaySlideOver() {
   const [newUpdateContent, setNewUpdateContent] = useState("");
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
   const [isPriorityDropdownOpen, setIsPriorityDropdownOpen] = useState(false);
+  const [isPosting, setIsPosting] = useState(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState("");
+  const updateInputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Files chosen but not yet posted; `url` is the base64 data URL.
+  const [pendingFiles, setPendingFiles] = useState<
+    { name: string; size: number; mimeType: string; url: string }[]
+  >([]);
 
   useEffect(() => {
     if (task) {
@@ -90,6 +123,14 @@ export function MondaySlideOver() {
   }, [activeTaskId, closeTaskModal]);
 
   if (!task) return null;
+
+  // Leaders (workspace owner/admin, or the board's owner) can edit anything;
+  // a member can change status on items assigned to them and add
+  // comments / checklist steps; viewers are read-only. The API enforces the
+  // same rules — this just avoids offering controls that would be refused.
+  const canManage = canDo("manage", task.boardId);
+  const canChangeStatus = canDo("status", task.boardId, task);
+  const canWrite = canDo("write", task.boardId);
 
   const statusConfig = TASK_STATUS_CONFIG[task.status] || {
     label: task.status,
@@ -130,14 +171,152 @@ export function MondaySlideOver() {
     }
   };
 
-  const handlePostUpdate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newUpdateContent.trim()) {
-      addComment(task.id, newUpdateContent.trim()).catch((err) =>
-        console.error("Failed to add comment:", err)
-      );
+  const handlePostUpdate = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const content = newUpdateContent.trim();
+    if ((!content && pendingFiles.length === 0) || isPosting) return;
+
+    setIsPosting(true);
+    setCommentError(null);
+    try {
+      await addComment(task.id, content, pendingFiles);
       setNewUpdateContent("");
+      setPendingFiles([]);
+      setMentionQuery(null);
+    } catch (err) {
+      console.error("Failed to add comment:", err);
+      setCommentError("Couldn't post your update. Please try again.");
+    } finally {
+      setIsPosting(false);
     }
+  };
+
+  const readAsDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
+  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const chosen = Array.from(e.target.files ?? []);
+    e.target.value = ""; // allow picking the same file again later
+    if (chosen.length === 0) return;
+
+    const limitError = validateAttachments([...pendingFiles, ...chosen]);
+    if (limitError) {
+      setCommentError(limitError);
+      return;
+    }
+    try {
+      const added = await Promise.all(
+        chosen.map(async (file) => ({
+          name: file.name,
+          size: file.size,
+          mimeType: file.type || "application/octet-stream",
+          url: await readAsDataUrl(file),
+        }))
+      );
+      setCommentError(null);
+      setPendingFiles((prev) => [...prev, ...added]);
+    } catch (err) {
+      console.error("Failed to read file:", err);
+      setCommentError("Couldn't read that file. Please try again.");
+    }
+  };
+
+  // Inserts text at the caret (or replaces [from, to)) and puts the caret
+  // right after it — used by the @ button and mention picker.
+  const insertAtCaret = (text: string, from?: number, to?: number) => {
+    const el = updateInputRef.current;
+    const start = from ?? el?.selectionStart ?? newUpdateContent.length;
+    const end = to ?? el?.selectionEnd ?? start;
+    setNewUpdateContent(newUpdateContent.slice(0, start) + text + newUpdateContent.slice(end));
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(start + text.length, start + text.length);
+    });
+  };
+
+  // Opens the picker when the caret sits right after "@<partial name>".
+  const detectMention = (value: string, caret: number) => {
+    const match = /(?:^|\s)@([^\s@]*)$/.exec(value.slice(0, caret));
+    setMentionQuery(match ? match[1].toLowerCase() : null);
+  };
+
+  const pickMention = (name: string) => {
+    const el = updateInputRef.current;
+    const caret = el?.selectionStart ?? newUpdateContent.length;
+    const atIndex = newUpdateContent.slice(0, caret).lastIndexOf("@");
+    insertAtCaret(`@${name} `, atIndex, caret);
+    setMentionQuery(null);
+  };
+
+  const mentionMatches =
+    mentionQuery === null
+      ? []
+      : mentionables
+          .filter((u) =>
+            u.name
+              .toLowerCase()
+              .split(/\s+/)
+              .some((part) => part.startsWith(mentionQuery)) ||
+            u.name.toLowerCase().startsWith(mentionQuery)
+          )
+          .slice(0, 6);
+
+  const startEditing = (id: string, content: string) => {
+    setEditingCommentId(id);
+    setEditingContent(content);
+    setCommentError(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingCommentId) return;
+    const original = comments.find((c) => c.id === editingCommentId);
+    const content = editingContent.trim();
+    if (!content || content === original?.content) {
+      setEditingCommentId(null);
+      return;
+    }
+    try {
+      await editComment(editingCommentId, content);
+      setEditingCommentId(null);
+    } catch (err) {
+      console.error("Failed to edit comment:", err);
+      setCommentError("Couldn't save your edit. Please try again.");
+    }
+  };
+
+  const handleDeleteComment = async (id: string) => {
+    if (!confirm("Delete this update permanently?")) return;
+    try {
+      await deleteComment(id);
+    } catch (err) {
+      console.error("Failed to delete comment:", err);
+      setCommentError("Couldn't delete the update. Please try again.");
+    }
+  };
+
+  // Wraps "@Full Name" mentions in a highlight; everything else stays text.
+  const renderContent = (content: string) => {
+    const names = mentionables
+      .map((u) => u.name)
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length)
+      .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    if (names.length === 0) return content;
+    const parts = content.split(new RegExp(`(@(?:${names.join("|")}))`, "i"));
+    return parts.map((part, i) =>
+      i % 2 === 1 ? (
+        <span key={i} className="font-semibold text-blue-400">
+          {part}
+        </span>
+      ) : (
+        part
+      )
+    );
   };
 
   const universalStatuses: TaskStatus[] = [
@@ -214,7 +393,8 @@ export function MondaySlideOver() {
 
           {/* Action Icons */}
           <div className="flex items-center gap-2">
-            <button
+            {canManage && (
+<button
               type="button"
               onClick={() => {
                 if (confirm("Delete this item permanently?")) {
@@ -226,6 +406,7 @@ export function MondaySlideOver() {
             >
               <Trash2 className="h-4 w-4" />
             </button>
+)}
 
             <button
               type="button"
@@ -243,6 +424,7 @@ export function MondaySlideOver() {
           <input
             type="text"
             value={title}
+            readOnly={!canManage}
             onChange={(e) => setTitle(e.target.value)}
             onBlur={handleTitleBlur}
             placeholder="New item name..."
@@ -285,8 +467,8 @@ export function MondaySlideOver() {
                   <label className="text-[11px] font-semibold text-zinc-400">Owner</label>
                   <div className="pt-0.5">
                     <AssigneeSelect
-                      currentAssigneeId={task.assigneeId}
-                      onAssign={(newUid) => assignTask(task.id, newUid)}
+                      currentAssigneeIds={task.assigneeIds}
+                      onAssign={(newUids) => assignTask(task.id, newUids)}
                       boardId={task.boardId}
                       size="sm"
                     />
@@ -298,6 +480,7 @@ export function MondaySlideOver() {
                   <label className="text-[11px] font-semibold text-zinc-400">Status</label>
                   <button
                     type="button"
+                    disabled={!canChangeStatus}
                     onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
                     className={`w-full py-1.5 px-2.5 rounded-lg font-semibold text-xs transition-all ${statusConfig.bgColor} ${statusConfig.color} text-center`}
                   >
@@ -331,6 +514,7 @@ export function MondaySlideOver() {
                   <label className="text-[11px] font-semibold text-zinc-400">Priority</label>
                   <button
                     type="button"
+                    disabled={!canManage}
                     onClick={() => setIsPriorityDropdownOpen(!isPriorityDropdownOpen)}
                     className={`w-full py-1.5 px-2.5 rounded-lg font-semibold text-xs transition-all ${priorityConfig.bgColor} ${priorityConfig.color} text-center`}
                   >
@@ -365,6 +549,7 @@ export function MondaySlideOver() {
                   <input
                     type="text"
                     value={category}
+                    readOnly={!canManage}
                     onChange={(e) => setCategory(e.target.value)}
                     onBlur={handleCategoryBlur}
                     placeholder="e.g. Marketing, Design"
@@ -399,6 +584,7 @@ export function MondaySlideOver() {
               <textarea
                 rows={4}
                 value={description}
+                readOnly={!canManage}
                 onChange={(e) => setDescription(e.target.value)}
                 onBlur={handleDescriptionBlur}
                 placeholder="+ Write project details, requirements, or deliverables..."
@@ -427,6 +613,7 @@ export function MondaySlideOver() {
                 >
                   <button
                     type="button"
+                    disabled={!canWrite}
                     onClick={() => toggleSubtask(st.id)}
                     className="text-zinc-500 hover:text-emerald-400 transition-colors shrink-0"
                   >
@@ -448,7 +635,8 @@ export function MondaySlideOver() {
                 </div>
               ))}
 
-              <form onSubmit={handleAddSubtask} className="flex gap-2">
+              {canWrite && (
+<form onSubmit={handleAddSubtask} className="flex gap-2">
                 <input
                   type="text"
                   value={newSubtaskTitle}
@@ -464,6 +652,7 @@ export function MondaySlideOver() {
                   Add
                 </button>
               </form>
+)}
             </div>
           </div>
           ) : (
@@ -482,26 +671,98 @@ export function MondaySlideOver() {
               </div>
 
               {/* Updates Form with formatting icons */}
-              <form
+              {canWrite ? (
+<form
                 onSubmit={handlePostUpdate}
-                className="rounded-xl border border-zinc-700/80 bg-zinc-900/80 p-3 space-y-2 shadow-xs"
+                className="relative rounded-xl border border-zinc-700/80 bg-zinc-900/80 p-3 space-y-2 shadow-xs"
               >
                 <textarea
+                  ref={updateInputRef}
                   rows={3}
                   value={newUpdateContent}
-                  onChange={(e) => setNewUpdateContent(e.target.value)}
+                  onChange={(e) => {
+                    setNewUpdateContent(e.target.value);
+                    detectMention(e.target.value, e.target.selectionStart);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape" && mentionQuery !== null) {
+                      // Close the picker only — don't let Esc close the drawer.
+                      e.stopPropagation();
+                      setMentionQuery(null);
+                    } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      handlePostUpdate();
+                    } else if (e.key === "Enter" && mentionMatches.length > 0) {
+                      e.preventDefault();
+                      pickMention(mentionMatches[0].name);
+                    }
+                  }}
                   placeholder="Write an update and mention others with @"
                   className="w-full bg-transparent text-xs text-white placeholder:text-zinc-500 focus:outline-none resize-none leading-relaxed"
                 />
 
+                {/* Files waiting to be posted */}
+                {pendingFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {pendingFiles.map((file, i) => (
+                      <span
+                        key={`${file.name}-${i}`}
+                        className="flex max-w-full items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800/70 py-1 pl-2 pr-1 text-[11px] text-zinc-200"
+                      >
+                        <Paperclip className="h-3 w-3 shrink-0 text-zinc-400" />
+                        <span className="truncate">{file.name}</span>
+                        <span className="shrink-0 text-zinc-500">{formatBytes(file.size)}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))
+                          }
+                          title="Remove file"
+                          className="rounded p-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-white"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* @mention suggestions */}
+                {mentionMatches.length > 0 && (
+                  <div className="absolute left-3 right-3 top-[4.5rem] z-20 rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-2xl">
+                    {mentionMatches.map((u, i) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onMouseDown={(e) => {
+                          // Keep the textarea focused so the caret position survives.
+                          e.preventDefault();
+                          pickMention(u.name);
+                        }}
+                        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-zinc-800 ${
+                          i === 0 ? "bg-zinc-800/60" : ""
+                        }`}
+                      >
+                        <span
+                          className={`flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold text-white ${u.avatarColor}`}
+                        >
+                          {u.avatarInitials}
+                        </span>
+                        <span className="font-medium text-zinc-200">{u.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 {/* Toolbar icons (@, attachment, emoji, pen) + Submit */}
                 <div className="flex items-center justify-between pt-2 border-t border-zinc-800">
-                  <div className="flex items-center gap-1 text-zinc-400">
+                  <div className="relative flex items-center gap-1 text-zinc-400">
                     <button
                       type="button"
-                      onClick={() =>
-                        setNewUpdateContent((prev) => prev + "@" + currentUser.name + " ")
-                      }
+                      onClick={() => {
+                        insertAtCaret("@");
+                        setMentionQuery("");
+                      }}
                       title="Mention member"
                       className="p-1 rounded hover:bg-zinc-800 hover:text-white transition-colors"
                     >
@@ -509,36 +770,45 @@ export function MondaySlideOver() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={pendingFiles.length >= MAX_ATTACHMENTS_PER_COMMENT}
                       title="Attach file"
-                      className="p-1 rounded hover:bg-zinc-800 hover:text-white transition-colors"
+                      className="p-1 rounded hover:bg-zinc-800 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
                     >
                       <Paperclip className="h-3.5 w-3.5" />
                     </button>
-                    <button
-                      type="button"
-                      title="Add emoji"
-                      className="p-1 rounded hover:bg-zinc-800 hover:text-white transition-colors"
-                    >
-                      <Smile className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      title="Formatting"
-                      className="p-1 rounded hover:bg-zinc-800 hover:text-white transition-colors"
-                    >
-                      <PenTool className="h-3.5 w-3.5" />
-                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      onChange={handleFilesSelected}
+                      className="hidden"
+                    />
                   </div>
 
-                  <button
-                    type="submit"
-                    disabled={!newUpdateContent.trim()}
-                    className="rounded-lg bg-blue-600 px-3.5 py-1 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-40 shadow-2xs"
-                  >
-                    Update
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <span className="hidden sm:block text-[10px] text-zinc-600">Ctrl + Enter</span>
+                    <button
+                      type="submit"
+                      disabled={(!newUpdateContent.trim() && pendingFiles.length === 0) || isPosting}
+                      className="rounded-lg bg-blue-600 px-3.5 py-1 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-40 shadow-2xs"
+                    >
+                      {isPosting ? "Posting…" : "Update"}
+                    </button>
+                  </div>
                 </div>
               </form>
+) : (
+  <p className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 text-[11px] text-zinc-500">
+    You have view-only access to this board, so you can read updates but not post them.
+  </p>
+)}
+
+              {commentError && (
+                <p role="alert" className="text-[11px] text-red-400">
+                  {commentError}
+                </p>
+              )}
 
               {/* Updates stream / Activity log */}
               <div className="space-y-3 pt-2">
@@ -558,14 +828,16 @@ export function MondaySlideOver() {
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                  <div className="space-y-3">
                     {/* Comments list */}
                     {taskComments.map((comment) => {
                       const author = users.find((u) => u.id === comment.authorId);
+                      const isOwn = comment.authorId === currentUser.id;
+                      const isEditing = editingCommentId === comment.id;
                       return (
                         <div
                           key={comment.id}
-                          className="rounded-xl border border-zinc-800 bg-[#16181f] p-3 space-y-2 text-xs"
+                          className="group rounded-xl border border-zinc-800 bg-[#16181f] p-3 space-y-2 text-xs"
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -580,13 +852,116 @@ export function MondaySlideOver() {
                                 {author?.name || "Team Member"}
                               </span>
                             </div>
-                            <span className="text-[10px] text-zinc-500">
-                              {formatDate(comment.createdAt)}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {isOwn && !isEditing && (
+                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                                  <button
+                                    type="button"
+                                    onClick={() => startEditing(comment.id, comment.content)}
+                                    title="Edit"
+                                    className="p-1 rounded text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteComment(comment.id)}
+                                    title="Delete"
+                                    className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              )}
+                              <span
+                                className="text-[10px] text-zinc-500"
+                                title={new Date(comment.createdAt).toLocaleString()}
+                              >
+                                {formatRelativeDate(new Date(comment.createdAt))}
+                                {comment.isEdited && " · edited"}
+                              </span>
+                            </div>
                           </div>
-                          <p className="text-zinc-300 leading-relaxed pl-7">
-                            {comment.content}
-                          </p>
+
+                          {isEditing ? (
+                            <div className="pl-7 space-y-2">
+                              <textarea
+                                autoFocus
+                                rows={3}
+                                value={editingContent}
+                                onChange={(e) => setEditingContent(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Escape") {
+                                    e.stopPropagation();
+                                    setEditingCommentId(null);
+                                  } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                                    e.preventDefault();
+                                    handleSaveEdit();
+                                  }
+                                }}
+                                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 p-2 text-xs text-white focus:border-blue-500 focus:outline-none resize-none leading-relaxed"
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingCommentId(null)}
+                                  className="rounded-lg px-3 py-1 text-xs font-semibold text-zinc-400 hover:text-white hover:bg-zinc-800"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleSaveEdit}
+                                  disabled={!editingContent.trim()}
+                                  className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-40"
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            comment.content && (
+                              <p className="text-zinc-300 leading-relaxed pl-7 whitespace-pre-wrap break-words">
+                                {renderContent(comment.content)}
+                              </p>
+                            )
+                          )}
+
+                          {comment.attachments && comment.attachments.length > 0 && (
+                            <div className="pl-7 flex flex-wrap gap-2">
+                              {comment.attachments.map((file) =>
+                                INLINE_IMAGE_TYPES.includes(file.mimeType) ? (
+                                  <a
+                                    key={file.id}
+                                    href={file.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={file.name}
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={file.url}
+                                      alt={file.name}
+                                      className="max-h-40 max-w-full rounded-lg border border-zinc-700 object-cover"
+                                    />
+                                  </a>
+                                ) : (
+                                  <a
+                                    key={file.id}
+                                    href={file.url}
+                                    download={file.name}
+                                    className="flex max-w-full items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800/60 px-2.5 py-1.5 text-[11px] text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800"
+                                  >
+                                    <FileText className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+                                    <span className="truncate">{file.name}</span>
+                                    <span className="shrink-0 text-zinc-500">
+                                      {formatBytes(file.size)}
+                                    </span>
+                                  </a>
+                                )
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })}

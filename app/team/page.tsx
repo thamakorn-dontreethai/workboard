@@ -60,7 +60,7 @@ export default function TeamPage() {
   const memberList = displayUsers.map((user) => {
     const memberRecord = workspace.members.find((m) => m.userId === user.id);
     const assignedTasks = tasks.filter(
-      (t) => t.assigneeId === user.id && !t.isArchived
+      (t) => t.assigneeIds.includes(user.id) && !t.isArchived
     );
     const inProgressTasks = assignedTasks.filter(
       (t) => t.status === "in_progress"
@@ -102,7 +102,7 @@ export default function TeamPage() {
     : null;
 
   const totalAssignedTasks = tasks.filter(
-    (t) => t.assigneeId !== null && !t.isArchived
+    (t) => t.assigneeIds.length > 0 && !t.isArchived
   ).length;
   const totalCompletedTasks = tasks.filter(
     (t) => t.status === "done" && !t.isArchived

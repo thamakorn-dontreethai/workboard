@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 import { TaskPriority, TASK_PRIORITY_CONFIG } from "@/types";
 import { X, Plus, Calendar, AlertCircle } from "lucide-react";
@@ -13,17 +13,26 @@ export function CreateTaskModal() {
     createTaskDefaultBoardId,
     createTaskDefaultGroupId,
     createTaskDefaultDueDate,
-    boards,
+    boards: allBoards,
     groups,
+    canDo,
     createTask,
     openTaskModal,
   } = useWorkBoard();
+
+  // Creating items is leader-only, so only boards the person manages are choices.
+  // Memoised: it's a dependency of the reset effect below, and a fresh array
+  // on every render would re-run it (wiping the form) on each keystroke.
+  const boards = useMemo(
+    () => allBoards.filter((b) => canDo("manage", b.id)),
+    [allBoards, canDo]
+  );
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [boardId, setBoardId] = useState("");
   const [groupId, setGroupId] = useState("");
-  const [assigneeId, setAssigneeId] = useState<string | null>(null);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [dueDateStr, setDueDateStr] = useState("");
 
@@ -35,7 +44,7 @@ export function CreateTaskModal() {
       setBoardId(initialBoardId);
       const availableGroups = groups.filter((g) => g.boardId === initialBoardId);
       setGroupId(createTaskDefaultGroupId || availableGroups[0]?.id || "");
-      setAssigneeId(null);
+      setAssigneeIds([]);
       setPriority("medium");
       if (createTaskDefaultDueDate) {
         const d = new Date(createTaskDefaultDueDate);
@@ -59,7 +68,7 @@ export function CreateTaskModal() {
   // Update groups when board changes
   const handleBoardChange = (newBoardId: string) => {
     setBoardId(newBoardId);
-    setAssigneeId(null);
+    setAssigneeIds([]);
     const availableGroups = groups.filter((g) => g.boardId === newBoardId);
     setGroupId(availableGroups[0]?.id || "");
   };
@@ -76,7 +85,7 @@ export function CreateTaskModal() {
         description: description.trim(),
         boardId,
         groupId,
-        assigneeId,
+        assigneeIds,
         priority,
         dueDate: dueDateStr ? new Date(dueDateStr) : null,
       });
@@ -200,8 +209,8 @@ export function CreateTaskModal() {
               </label>
               <div className="pt-0.5">
                 <AssigneeSelect
-                  currentAssigneeId={assigneeId}
-                  onAssign={(uid) => setAssigneeId(uid)}
+                  currentAssigneeIds={assigneeIds}
+                  onAssign={(uids) => setAssigneeIds(uids)}
                   boardId={boardId}
                   size="md"
                 />
@@ -243,21 +252,16 @@ export function CreateTaskModal() {
               type="date"
               value={dueDateStr}
               onChange={(e) => setDueDateStr(e.target.value)}
-              className="w-full rounded-xl border border-border bg-background px-3.5 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-          </div>
-
-          {/* Description */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground">
-              Description / Notes
-            </label>
-            <textarea
-              rows={2}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Provide context or instructions for the team member..."
-              className="w-full rounded-xl border border-border bg-background p-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+              // Open the calendar on a click anywhere in the field, not just
+              // on the tiny browser icon.
+              onClick={(e) => {
+                try {
+                  e.currentTarget.showPicker();
+                } catch {
+                  // Unsupported / not allowed here — the native icon still works.
+                }
+              }}
+              className="w-full cursor-pointer rounded-xl border border-border bg-background px-3.5 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:[color-scheme:dark]"
             />
           </div>
 

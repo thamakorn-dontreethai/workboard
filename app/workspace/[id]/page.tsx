@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 import {
@@ -41,9 +41,17 @@ import {
   FileImage,
   FileArchive,
   Box,
+  Calendar as CalendarIcon,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Bell,
+  ListChecks,
+  CheckCircle2,
 } from "lucide-react";
-import type { Post, WorkspaceFile } from "@/types";
-import { formatDate } from "@/lib/utils/date";
+import type { Post, WorkspaceFile, WorkspaceAppointment } from "@/types";
+import { formatDate, isOverdue } from "@/lib/utils/date";
+import { getThaiHolidayForDate } from "@/lib/utils/thaiHolidays";
 
 import { CoverColorPicker } from "@/components/workspace/CoverColorPicker";
 import { AvatarCustomizerPicker } from "@/components/workspace/AvatarCustomizerPicker";
@@ -52,6 +60,7 @@ import { WorkspaceAvatar } from "@/components/workspace/WorkspaceAvatar";
 export default function WorkspacePage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const rawId = params?.id;
   const workspaceId = Array.isArray(rawId) ? rawId[0] : (rawId as string);
 
@@ -85,10 +94,16 @@ export default function WorkspacePage() {
     }
   }, [workspaceId, workspace.id, workspaces, switchWorkspace]);
 
-  // Tab State
-  const [activeTab, setActiveTab] = useState<"posts" | "content" | "files" | "permissions">(
-    "posts"
-  );
+  // Tab State — honors ?tab= so links (e.g. from the global Calendar page)
+  // can deep-link straight into a specific tab.
+  const VALID_TABS = ["posts", "content", "files", "calendar", "permissions"] as const;
+  type WorkspaceTab = (typeof VALID_TABS)[number];
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(() => {
+    const tabParam = searchParams?.get("tab");
+    return (VALID_TABS as readonly string[]).includes(tabParam || "")
+      ? (tabParam as WorkspaceTab)
+      : "posts";
+  });
 
   // ─── Workspace Posts (simple social feed, scoped to this workspace) ────
   const [posts, setPosts] = useState<Post[]>([]);
@@ -298,6 +313,174 @@ export default function WorkspacePage() {
     if (activeTab === "permissions") refreshWorkspaces();
   }, [activeTab, refreshWorkspaces]);
 
+  // ─── Calendar (this workspace's board tasks + shared appointments) ──────
+  const workspaceBoardIds = useMemo(
+    () => new Set(workspaceBoards.map((b) => b.id)),
+    [workspaceBoards]
+  );
+  const workspaceTasks = useMemo(
+    () => tasks.filter((t) => workspaceBoardIds.has(t.boardId) && t.dueDate && !t.isArchived),
+    [tasks, workspaceBoardIds]
+  );
+
+  // Per-member task stats for the Member tab — unlike workspaceTasks above
+  // (calendar-only, requires a due date), this counts every active task so
+  // "Assigned" reflects a member's real load, not just their scheduled one.
+  const memberTaskStats = useMemo(() => {
+    const map = new Map<string, { assigned: number; completed: number; overdue: number }>();
+    tasks.forEach((t) => {
+      if (t.isArchived || !workspaceBoardIds.has(t.boardId)) return;
+      t.assigneeIds.forEach((assigneeId) => {
+        const entry = map.get(assigneeId) || { assigned: 0, completed: 0, overdue: 0 };
+        entry.assigned += 1;
+        if (t.status === "done" || t.status === "approved") entry.completed += 1;
+        if (isOverdue(t.dueDate, t.status)) entry.overdue += 1;
+        map.set(assigneeId, entry);
+      });
+    });
+    return map;
+  }, [tasks, workspaceBoardIds]);
+  const workspaceMembersList = useMemo(
+    () =>
+      (currentWs.members || [])
+        .map((m) => users.find((u) => u.id === m.userId))
+        .filter((u): u is (typeof users)[number] => Boolean(u)),
+    [currentWs.members, users]
+  );
+
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [selectedDay, setSelectedDay] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  });
+  const [appointments, setAppointments] = useState<WorkspaceAppointment[]>([]);
+  const [isLoadingAppointments, setIsLoadingAppointments] = useState(false);
+  const [isCreatingAppointment, setIsCreatingAppointment] = useState(false);
+  const [newApptTitle, setNewApptTitle] = useState("");
+  const [newApptNotes, setNewApptNotes] = useState("");
+  const [newApptTime, setNewApptTime] = useState("09:00");
+  const [newApptReminder, setNewApptReminder] = useState(30);
+  const [newApptAttendeeIds, setNewApptAttendeeIds] = useState<string[]>([]);
+  const [apptFormError, setApptFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!currentWs?.id || activeTab !== "calendar") return;
+    let cancelled = false;
+    setIsLoadingAppointments(true);
+    fetch(`/api/appointments?workspaceId=${encodeURIComponent(currentWs.id)}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (cancelled || !res?.success || !Array.isArray(res.data)) return;
+        setAppointments(
+          res.data.map((a: WorkspaceAppointment) => ({
+            ...a,
+            startAt: new Date(a.startAt),
+            createdAt: new Date(a.createdAt),
+            updatedAt: new Date(a.updatedAt),
+          }))
+        );
+      })
+      .catch((err) => console.error("Failed to load appointments:", err))
+      .finally(() => {
+        if (!cancelled) setIsLoadingAppointments(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWs?.id, activeTab]);
+
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const monthDays = useMemo(() => {
+    const year = calendarMonth.getFullYear();
+    const month = calendarMonth.getMonth();
+    const startOffset = new Date(year, month, 1).getDay();
+    const gridStart = new Date(year, month, 1 - startOffset);
+    return Array.from(
+      { length: 42 },
+      (_, i) => new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i)
+    );
+  }, [calendarMonth]);
+
+  const tasksByDay = (day: Date) =>
+    workspaceTasks.filter((t) => t.dueDate && isSameDay(new Date(t.dueDate), day));
+  const appointmentsByDay = (day: Date) =>
+    appointments.filter((a) => isSameDay(a.startAt, day));
+
+  const toggleAttendee = (userId: string) => {
+    setNewApptAttendeeIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const handleCreateAppointment = async () => {
+    if (!newApptTitle.trim()) {
+      setApptFormError("Title is required.");
+      return;
+    }
+    const [hh, mm] = newApptTime.split(":").map(Number);
+    const startAt = new Date(
+      selectedDay.getFullYear(),
+      selectedDay.getMonth(),
+      selectedDay.getDate(),
+      hh || 0,
+      mm || 0
+    );
+    try {
+      setApptFormError(null);
+      const res = await fetch("/api/appointments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: currentWs.id,
+          createdById: currentUser.id,
+          title: newApptTitle.trim(),
+          notes: newApptNotes.trim(),
+          startAt: startAt.toISOString(),
+          attendeeIds: newApptAttendeeIds,
+          reminderMinutesBefore: newApptReminder,
+        }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) throw new Error(result?.error);
+      const created: WorkspaceAppointment = {
+        ...result.data,
+        startAt: new Date(result.data.startAt),
+        createdAt: new Date(result.data.createdAt),
+        updatedAt: new Date(result.data.updatedAt),
+      };
+      setAppointments((prev) =>
+        [...prev, created].sort((a, b) => a.startAt.getTime() - b.startAt.getTime())
+      );
+      setIsCreatingAppointment(false);
+      setNewApptTitle("");
+      setNewApptNotes("");
+      setNewApptTime("09:00");
+      setNewApptReminder(30);
+      setNewApptAttendeeIds([]);
+    } catch (err: any) {
+      setApptFormError(err.message || "Failed to create appointment.");
+    }
+  };
+
+  const handleDeleteAppointment = async (id: string) => {
+    if (!confirm("Delete this appointment?")) return;
+    try {
+      const res = await fetch(`/api/appointments/${id}`, { method: "DELETE" });
+      const result = await res.json();
+      if (!result?.success) throw new Error(result?.error);
+      setAppointments((prev) => prev.filter((a) => a.id !== id));
+    } catch (err) {
+      console.error("Failed to delete appointment:", err);
+    }
+  };
+
   // Picking a file doesn't upload it right away — it's held as "pending"
   // so the user can add an optional caption/note before it actually goes
   // up, instead of uploading blind and editing after the fact.
@@ -461,14 +644,14 @@ export default function WorkspacePage() {
         prev.map((p) =>
           p.id === postId
             ? {
-                ...result.data,
-                createdAt: new Date(result.data.createdAt),
-                updatedAt: new Date(result.data.updatedAt),
-                comments: result.data.comments.map((c: any) => ({
-                  ...c,
-                  createdAt: new Date(c.createdAt),
-                })),
-              }
+              ...result.data,
+              createdAt: new Date(result.data.createdAt),
+              updatedAt: new Date(result.data.updatedAt),
+              comments: result.data.comments.map((c: any) => ({
+                ...c,
+                createdAt: new Date(c.createdAt),
+              })),
+            }
             : p
         )
       );
@@ -505,14 +688,14 @@ export default function WorkspacePage() {
         prev.map((p) =>
           p.id === postId
             ? {
-                ...result.data,
-                createdAt: new Date(result.data.createdAt),
-                updatedAt: new Date(result.data.updatedAt),
-                comments: result.data.comments.map((c: any) => ({
-                  ...c,
-                  createdAt: new Date(c.createdAt),
-                })),
-              }
+              ...result.data,
+              createdAt: new Date(result.data.createdAt),
+              updatedAt: new Date(result.data.updatedAt),
+              comments: result.data.comments.map((c: any) => ({
+                ...c,
+                createdAt: new Date(c.createdAt),
+              })),
+            }
             : p
         )
       );
@@ -686,14 +869,8 @@ export default function WorkspacePage() {
 
             {/* Right Actions: Feedback, Avatar, ••• (Firmly in dark area) */}
             <div className="flex items-center gap-5 pt-4">
-              {/* Feedback */}
-              <button
-                type="button"
-                className="flex items-center gap-2 px-2 py-1 rounded text-sm text-zinc-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-              >
-                <MessageCircleHeart className="h-4 w-4" />
-                <span>Feedback</span>
-              </button>
+
+
 
               {/* Current User */}
               <div className="text-white" title={currentUser.name}>
@@ -786,6 +963,7 @@ export default function WorkspacePage() {
                 { id: "posts", label: "Posts", icon: MessageSquare },
                 { id: "content", label: "Content", icon: SquarePen },
                 { id: "files", label: "Files", icon: FileIcon },
+                { id: "calendar", label: "Calendar", icon: CalendarIcon },
                 { id: "permissions", label: "Member", icon: Lock },
               ] as const
             ).map(({ id, label, icon: Icon }) => (
@@ -1325,10 +1503,295 @@ export default function WorkspacePage() {
             </div>
           )}
 
+          {/* TAB: CALENDAR — this workspace's board tasks + shared appointments */}
+          {activeTab === "calendar" && (() => {
+            const myRole = (currentWs.members || []).find(
+              (m) => m.userId === currentUser.id
+            )?.role;
+            const canManage = myRole === "owner" || myRole === "admin";
+            const selectedDayTasks = tasksByDay(selectedDay);
+            const selectedDayAppointments = appointmentsByDay(selectedDay);
+            const selectedDayHoliday = getThaiHolidayForDate(selectedDay);
+            const monthLabel = calendarMonth.toLocaleDateString("en-US", {
+              month: "long",
+              year: "numeric",
+            });
+            const today = new Date();
+
+            return (
+              <div className="py-4 flex flex-col lg:flex-row gap-6">
+                {/* Month grid */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold text-white">{monthLabel}</h3>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCalendarMonth(
+                            new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1)
+                          )
+                        }
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const d = new Date();
+                          setCalendarMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+                          setSelectedDay(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+                        }}
+                        className="px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                      >
+                        Today
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCalendarMonth(
+                            new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1)
+                          )
+                        }
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-7 gap-1 text-[9px] sm:text-[10px] text-zinc-500 uppercase font-semibold mb-1 px-0.5">
+                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+                      <div key={d} className="text-center py-1">
+                        {d}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {monthDays.map((day, i) => {
+                      const inMonth = day.getMonth() === calendarMonth.getMonth();
+                      const dayTasks = tasksByDay(day);
+                      const dayAppts = appointmentsByDay(day);
+                      const isToday = isSameDay(day, today);
+                      const isSelected = isSameDay(day, selectedDay);
+                      const holiday = getThaiHolidayForDate(day);
+                      const totalItems = dayTasks.length + dayAppts.length;
+                      const visibleAppts = dayAppts.slice(0, 2);
+                      const visibleTasks = dayTasks.slice(0, Math.max(0, 2 - visibleAppts.length));
+                      const overflow = totalItems - visibleAppts.length - visibleTasks.length;
+
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setSelectedDay(day)}
+                          className={`min-h-[84px] sm:min-h-[104px] rounded-lg p-1 sm:p-1.5 text-left flex flex-col gap-0.5 border transition-colors cursor-pointer ${isSelected
+                            ? "border-[#0073ea] bg-[#0073ea]/10"
+                            : holiday
+                              ? "border-rose-900/30 bg-rose-950/10 hover:border-rose-700/50"
+                              : "border-transparent hover:bg-zinc-800/40"
+                            } ${inMonth ? "" : "opacity-40"}`}
+                        >
+                          <span
+                            className={`shrink-0 text-[11px] font-medium ${isToday
+                              ? "flex h-5 w-5 items-center justify-center rounded-full bg-[#0073ea] text-white"
+                              : holiday
+                                ? "text-rose-300 font-semibold"
+                                : "text-zinc-300"
+                              }`}
+                          >
+                            {day.getDate()}
+                          </span>
+
+                          {holiday && (
+                            <span
+                              className="text-[8.5px] sm:text-[9px] leading-tight text-rose-300 truncate"
+                              title={`${holiday.nameTh} · ${holiday.nameEn}`}
+                            >
+                              🇹🇭 {holiday.nameTh}
+                            </span>
+                          )}
+
+                          <div className="flex-1 space-y-0.5 overflow-hidden">
+                            {visibleAppts.map((a) => (
+                              <div
+                                key={a.id}
+                                title={a.title}
+                                className="truncate rounded bg-emerald-950/40 border border-emerald-700/30 px-1 py-0.5 text-[8.5px] sm:text-[9.5px] text-emerald-200"
+                              >
+                                {a.startAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{" "}
+                                {a.title}
+                              </div>
+                            ))}
+                            {visibleTasks.map((t) => (
+                              <div
+                                key={t.id}
+                                title={t.title}
+                                className="truncate rounded bg-blue-950/40 border border-blue-700/30 px-1 py-0.5 text-[8.5px] sm:text-[9.5px] text-blue-200"
+                              >
+                                {t.title}
+                              </div>
+                            ))}
+                            {overflow > 0 && (
+                              <div className="text-[8.5px] sm:text-[9.5px] font-semibold text-indigo-400 px-1">
+                                +{overflow} more
+                              </div>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center gap-4 mt-3 text-[10px] text-zinc-500 flex-wrap">
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-blue-400" /> Task due
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Appointment
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span>🇹🇭</span> Thai holiday
+                    </span>
+                  </div>
+                </div>
+
+                {/* Day panel */}
+                <div className="w-full lg:w-80 lg:shrink-0 border-t lg:border-t-0 lg:border-l border-zinc-800 pt-4 lg:pt-0 lg:pl-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-semibold text-white">
+                      {selectedDay.toLocaleDateString("en-US", {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setApptFormError(null);
+                        setNewApptTitle("");
+                        setNewApptNotes("");
+                        setNewApptTime("09:00");
+                        setNewApptReminder(30);
+                        setNewApptAttendeeIds([]);
+                        setIsCreatingAppointment(true);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#0073ea] hover:bg-[#0060c0] text-white text-[11px] font-semibold transition-colors"
+                    >
+                      <Plus className="h-3 w-3" /> Appointment
+                    </button>
+                  </div>
+
+                  {selectedDayHoliday && (
+                    <div className="mb-3 p-2.5 rounded-xl border border-rose-800/40 bg-rose-950/30 text-rose-200 flex items-start gap-2.5 text-xs">
+                      <span className="text-base leading-none shrink-0">🇹🇭</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-rose-300">{selectedDayHoliday.nameTh}</p>
+                        <p className="text-[10px] text-rose-400/80">{selectedDayHoliday.nameEn}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {isLoadingAppointments ? (
+                    <div className="py-10 text-center text-xs text-zinc-500">Loading...</div>
+                  ) : (
+                    <div className="space-y-4">
+                      {selectedDayAppointments.length > 0 && (
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] font-semibold text-zinc-500 uppercase">
+                            Appointments
+                          </p>
+                          {selectedDayAppointments.map((a) => {
+                            const creator = users.find((u) => u.id === a.createdById);
+                            const canDelete = canManage || a.createdById === currentUser.id;
+                            return (
+                              <div
+                                key={a.id}
+                                className="group flex items-start justify-between gap-2 p-2.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-xs font-medium text-white truncate">
+                                    {a.title}
+                                  </p>
+                                  <p className="text-[10px] text-zinc-500">
+                                    {a.startAt.toLocaleTimeString([], {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                    {creator ? ` · ${creator.name}` : ""}
+                                  </p>
+                                  {a.notes && (
+                                    <p className="text-[10px] text-zinc-400 mt-0.5">{a.notes}</p>
+                                  )}
+                                </div>
+                                {canDelete && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteAppointment(a.id)}
+                                    title="Delete"
+                                    className="opacity-0 group-hover:opacity-100 shrink-0 text-zinc-500 hover:text-rose-400 transition-colors"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {selectedDayTasks.length > 0 && (
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] font-semibold text-zinc-500 uppercase">
+                            Tasks Due
+                          </p>
+                          {selectedDayTasks.map((t) => {
+                            const board = boards.find((b) => b.id === t.boardId);
+                            return (
+                              <Link
+                                key={t.id}
+                                href={`/board/${t.boardId}`}
+                                className="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-blue-500/5 border border-blue-500/20 hover:bg-blue-500/10 transition-colors"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-xs font-medium text-white truncate">
+                                    {t.title}
+                                  </p>
+                                  <p className="text-[10px] text-zinc-500 truncate">
+                                    {board?.name || "Board"}
+                                  </p>
+                                </div>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {selectedDayAppointments.length === 0 && selectedDayTasks.length === 0 && (
+                        <p className="text-xs text-zinc-500 text-center py-8">
+                          Nothing scheduled for this day.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* TAB 3: PERMISSIONS (Member) */}
           {activeTab === "permissions" && (() => {
+            const myRole = (currentWs.members || []).find(
+              (m) => m.userId === currentUser.id
+            )?.role;
+            const canManageMembers = myRole === "owner" || myRole === "admin";
+            // Nobody can be bulk-removed here except plain members/admins —
+            // never yourself, and never the owner (no ownership-transfer
+            // flow exists yet, so that would leave the workspace ownerless).
             const removableMembers = (currentWs.members || []).filter(
-              (m) => m.userId !== currentUser.id
+              (m) => m.userId !== currentUser.id && m.role !== "owner"
             );
             const allRemovableSelected =
               removableMembers.length > 0 &&
@@ -1371,7 +1834,7 @@ export default function WorkspacePage() {
               <div className="py-4 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    {removableMembers.length > 0 && (
+                    {canManageMembers && removableMembers.length > 0 && (
                       <input
                         type="checkbox"
                         checked={allRemovableSelected}
@@ -1401,21 +1864,29 @@ export default function WorkspacePage() {
                     const roleLabel =
                       member.role.charAt(0).toUpperCase() + member.role.slice(1);
                     const isSelf = member.userId === currentUser.id;
+                    const isOwner = member.role === "owner";
                     const isSelected = selectedMemberIds.includes(member.userId);
+                    const disabledReason = isOwner
+                      ? "The owner can't be removed"
+                      : isSelf
+                        ? "You can't remove yourself"
+                        : undefined;
                     return (
                       <div
                         key={member.userId}
                         className={`flex items-center justify-between py-2.5 px-1 rounded-lg transition-colors ${isSelected ? "bg-[#0073ea]/5" : ""}`}
                       >
                         <div className="flex items-center gap-3">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            disabled={isSelf}
-                            onChange={() => toggleSelectMember(member.userId)}
-                            title={isSelf ? "You can't remove yourself" : "Select"}
-                            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 cursor-pointer accent-[#0073ea] disabled:opacity-30 disabled:cursor-not-allowed"
-                          />
+                          {canManageMembers && (
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              disabled={isSelf || isOwner}
+                              onChange={() => toggleSelectMember(member.userId)}
+                              title={disabledReason || "Select"}
+                              className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 cursor-pointer accent-[#0073ea] disabled:opacity-30 disabled:cursor-not-allowed"
+                            />
+                          )}
                           <div
                             className={`flex h-6 w-6 items-center justify-center rounded-full font-bold text-xs text-white ${u.avatarColor || "bg-indigo-600"
                               }`}
@@ -1433,9 +1904,45 @@ export default function WorkspacePage() {
                           </div>
                         </div>
 
-                        <span className="text-xs text-zinc-400 font-medium">
-                          {roleLabel}
-                        </span>
+                        <div className="flex items-center gap-4">
+                          {(() => {
+                            const stats = memberTaskStats.get(member.userId) || {
+                              assigned: 0,
+                              completed: 0,
+                              overdue: 0,
+                            };
+                            return (
+                              <div className="hidden sm:flex items-center gap-3 text-[11px] text-zinc-500 tabular-nums">
+                                <span
+                                  className="flex items-center gap-1"
+                                  title={`${stats.assigned} assigned task${stats.assigned === 1 ? "" : "s"}`}
+                                >
+                                  <ListChecks className="h-3 w-3 text-blue-400" />
+                                  {stats.assigned}
+                                </span>
+                                <span
+                                  className="flex items-center gap-1"
+                                  title={`${stats.completed} completed task${stats.completed === 1 ? "" : "s"}`}
+                                >
+                                  <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                                  {stats.completed}
+                                </span>
+                                <span
+                                  className={`flex items-center gap-1 ${
+                                    stats.overdue > 0 ? "text-rose-400 font-semibold" : ""
+                                  }`}
+                                  title={`${stats.overdue} overdue task${stats.overdue === 1 ? "" : "s"}`}
+                                >
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {stats.overdue}
+                                </span>
+                              </div>
+                            );
+                          })()}
+                          <span className="text-xs text-zinc-400 font-medium shrink-0">
+                            {roleLabel}
+                          </span>
+                        </div>
                       </div>
                     );
                   })}
@@ -1483,6 +1990,140 @@ export default function WorkspacePage() {
           })()}
         </div>
       </div>
+
+      {/* ─── NEW APPOINTMENT MODAL ────────────────────────────────────────────── */}
+      {isCreatingAppointment && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-150"
+        >
+          <div
+            className="fixed inset-0"
+            onClick={() => setIsCreatingAppointment(false)}
+            aria-hidden="true"
+          />
+
+          <div className="relative w-full max-w-md rounded-2xl border border-zinc-700 bg-[#1c1e28] p-5 sm:p-6 text-zinc-100 shadow-2xl z-10 space-y-4 max-h-[88vh] overflow-y-auto animate-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-white">New Appointment</h3>
+                <p className="text-[11px] text-zinc-500 mt-0.5">
+                  {selectedDay.toLocaleDateString("en-US", {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                  })}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCreatingAppointment(false)}
+                className="text-zinc-500 hover:text-white p-1 rounded-md hover:bg-zinc-800 shrink-0"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-zinc-400">Title</label>
+              <input
+                type="text"
+                autoFocus
+                value={newApptTitle}
+                onChange={(e) => setNewApptTitle(e.target.value)}
+                placeholder="e.g. Weekly sync with design team"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900/90 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#0073ea]"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-zinc-400">Notes (optional)</label>
+              <textarea
+                value={newApptNotes}
+                onChange={(e) => setNewApptNotes(e.target.value)}
+                placeholder="Agenda, meeting link, location..."
+                rows={3}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900/90 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#0073ea] resize-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-zinc-400 flex items-center gap-1">
+                  <Clock className="h-3 w-3" /> Time
+                </label>
+                <input
+                  type="time"
+                  value={newApptTime}
+                  onChange={(e) => setNewApptTime(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900/90 px-2.5 py-2 text-sm text-white focus:outline-none focus:border-[#0073ea]"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-zinc-400 flex items-center gap-1">
+                  <Bell className="h-3 w-3" /> Reminder
+                </label>
+                <select
+                  value={newApptReminder}
+                  onChange={(e) => setNewApptReminder(Number(e.target.value))}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900/90 px-2.5 py-2 text-sm text-white focus:outline-none focus:border-[#0073ea]"
+                >
+                  <option value={10}>10m before</option>
+                  <option value={30}>30m before</option>
+                  <option value={60}>1h before</option>
+                  <option value={1440}>1d before</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium text-zinc-400">
+                Attendees (none selected = everyone in this workspace)
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {workspaceMembersList.map((u) => (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => toggleAttendee(u.id)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs border transition-colors cursor-pointer ${newApptAttendeeIds.includes(u.id)
+                      ? "border-[#0073ea] bg-[#0073ea]/20 text-white"
+                      : "border-zinc-700 text-zinc-400 hover:text-white"
+                      }`}
+                  >
+                    <span
+                      className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white ${u.avatarColor}`}
+                    >
+                      {u.avatarInitials}
+                    </span>
+                    {u.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {apptFormError && <p className="text-xs text-rose-400">{apptFormError}</p>}
+
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setIsCreatingAppointment(false)}
+                className="px-4 py-2 rounded-xl text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateAppointment}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#0073ea] hover:bg-[#0060c0] text-white shadow-md transition-colors"
+              >
+                Create Appointment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── 5. DELETE WORKSPACE CONFIRMATION MODAL ──────────────────────────── */}
       {isDeleteDialogOpen && (

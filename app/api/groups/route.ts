@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGroups, createGroup } from "@/lib/server/db";
+import { authorizeBoard } from "@/lib/server/permissions";
 
 export async function GET(request: Request) {
   try {
@@ -24,6 +25,9 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
+    const auth = await authorizeBoard(request, body.boardId, "manage");
+    if (!auth.ok) return auth.response;
 
     const newGroup = await createGroup({
       boardId: body.boardId,

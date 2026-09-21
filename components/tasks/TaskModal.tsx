@@ -205,8 +205,8 @@ export function TaskModal() {
               </label>
               <div className="pt-0.5">
                 <AssigneeSelect
-                  currentAssigneeId={task.assigneeId}
-                  onAssign={(newUid) => assignTask(task.id, newUid)}
+                  currentAssigneeIds={task.assigneeIds}
+                  onAssign={(newUids) => assignTask(task.id, newUids)}
                   boardId={task.boardId}
                   size="md"
                 />

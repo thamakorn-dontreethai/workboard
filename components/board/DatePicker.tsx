@@ -8,9 +8,11 @@ import { FloatingPanel } from "@/components/board/FloatingPanel";
 interface DatePickerProps {
   currentDate: Date | null;
   onDateChange: (date: Date | null) => void;
+  // Read-only: shows the date but can't be opened (no permission to change it).
+  disabled?: boolean;
 }
 
-export function DatePicker({ currentDate, onDateChange }: DatePickerProps) {
+export function DatePicker({ currentDate, onDateChange, disabled = false }: DatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [viewDate, setViewDate] = useState(currentDate || new Date());
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -50,8 +52,11 @@ export function DatePicker({ currentDate, onDateChange }: DatePickerProps) {
       <button
         ref={buttonRef}
         type="button"
+        disabled={disabled}
         onClick={() => setIsOpen((v) => !v)}
-        className="w-full flex items-center justify-center gap-2 py-1.5 px-2 rounded-lg border border-zinc-700 bg-zinc-900/50 text-xs text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+        className={`w-full flex items-center justify-center gap-2 py-1.5 px-2 rounded-lg border border-zinc-700 bg-zinc-900/50 text-xs text-zinc-300 transition-colors ${
+          disabled ? "cursor-default" : "hover:text-white hover:bg-zinc-800"
+        }`}
       >
         <Calendar className="h-3.5 w-3.5" />
         <span>{currentDate ? formatDate(currentDate) : "No date"}</span>

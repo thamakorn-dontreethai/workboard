@@ -14,6 +14,11 @@ export interface User {
   role: string;
   department?: string;
   isActive: boolean;
+  // Per-type opt-out switches for Posts feed notifications; undefined is
+  // treated as "on" (matches the DB default) rather than "off".
+  notifyPostLikes?: boolean;
+  notifyPostComments?: boolean;
+  notifyNewPosts?: boolean;
 }
 
 // ─── Workspace ────────────────────────────────────────────────────────────────
@@ -133,7 +138,7 @@ export interface Task {
   description: string;
   status: TaskStatus;
   priority: TaskPriority;
-  assigneeId: ID | null;
+  assigneeIds: ID[];
   reporterId: ID;
   dueDate: Date | null;
   timeline?: { start: string; end: string } | null;
@@ -166,11 +171,21 @@ export interface Subtask {
 
 // ─── Comments ─────────────────────────────────────────────────────────────────
 
+export interface CommentAttachment {
+  id: ID;
+  name: string;
+  size: number;
+  mimeType: string;
+  // Stored as a base64 data URL; API responses swap it for a download URL.
+  url: string;
+}
+
 export interface Comment {
   id: ID;
   taskId: ID;
   authorId: ID;
   content: string;
+  attachments?: CommentAttachment[];
   isEdited: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -225,7 +240,11 @@ export type NotificationType =
   | "status_change"
   | "comment"
   | "due_date"
-  | "todo_reminder";
+  | "todo_reminder"
+  | "appointment_reminder"
+  | "post_like"
+  | "post_comment"
+  | "new_post";
 
 export interface Notification {
   id: ID;
@@ -277,6 +296,44 @@ export interface Post {
   likeCount: number;
   dislikeCount: number;
   myReaction: "like" | "dislike" | null;
+}
+
+// ─── Workspace Appointments (shared meetings/to-dos scoped to a workspace) ────
+// Unlike PersonalTodo (private, per-user), these are visible to the whole
+// workspace and drive an in-app Notification + email reminder per attendee.
+
+export interface WorkspaceAppointment {
+  id: ID;
+  workspaceId: ID;
+  boardId?: ID | null;
+  createdById: ID;
+  title: string;
+  notes?: string;
+  startAt: Date;
+  attendeeIds: ID[]; // empty = every current workspace member
+  reminderMinutesBefore: number;
+  isCompleted: boolean;
+  reminderSentAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ─── Dashboards (saved analytics report views over one workspace) ─────────
+// Only the config (name, description, chosen widgets) is stored — the
+// numbers/charts are always computed live from that workspace's Task/Board
+// data, never cached here, so the report can't go stale.
+
+export type DashboardWidgetId = "kpis" | "distribution" | "workload" | "trend";
+
+export interface Dashboard {
+  id: ID;
+  workspaceId: ID;
+  name: string;
+  description?: string;
+  widgets: DashboardWidgetId[];
+  createdById: ID;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 // ─── Workspace Files (document library — PDF, Word, Excel, 3D models, etc.) ───

@@ -3,11 +3,13 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
+import type { DashboardWidgetId } from "@/types";
 import {
   X,
   BarChart3,
   PieChart,
   Activity,
+  TrendingUp,
   Check,
   Plus,
   LayoutDashboard,
@@ -16,21 +18,24 @@ import {
 
 export function CreateDashboardModal() {
   const router = useRouter();
-  const { isCreateDashboardOpen, closeCreateDashboardModal } = useWorkBoard();
+  const { isCreateDashboardOpen, closeCreateDashboardModal, workspace, createDashboard } =
+    useWorkBoard();
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [selectedWidgets, setSelectedWidgets] = useState<string[]>([
+  const [selectedWidgets, setSelectedWidgets] = useState<DashboardWidgetId[]>([
     "kpis",
     "distribution",
     "workload",
+    "trend",
   ]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!isCreateDashboardOpen) return null;
 
-  const WIDGET_OPTIONS = [
+  const WIDGET_OPTIONS: { id: DashboardWidgetId; title: string; desc: string; icon: any }[] = [
     {
       id: "kpis",
       title: "KPI Counter Cards",
@@ -40,7 +45,7 @@ export function CreateDashboardModal() {
     {
       id: "distribution",
       title: "Task Status Breakdown",
-      desc: "Visual donut/bar chart of items by workflow stage",
+      desc: "Donut chart of items by workflow stage + priority",
       icon: PieChart,
     },
     {
@@ -49,28 +54,45 @@ export function CreateDashboardModal() {
       desc: "Assigned tasks per member across all boards",
       icon: BarChart3,
     },
+    {
+      id: "trend",
+      title: "Completion Trend",
+      desc: "Tasks created vs. completed over the last 14 days",
+      icon: TrendingUp,
+    },
   ];
 
-  const toggleWidget = (id: string) => {
+  const toggleWidget = (id: DashboardWidgetId) => {
     setSelectedWidgets((prev) =>
       prev.includes(id) ? prev.filter((w) => w !== id) : [...prev, id]
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || isSubmitting) return;
 
+    setError(null);
     setIsSubmitting(true);
-    setShowSuccess(true);
-    setTimeout(() => {
-      setShowSuccess(false);
+    try {
+      const dashboard = await createDashboard({
+        name: name.trim(),
+        description: description.trim(),
+        widgets: selectedWidgets,
+      });
+      setShowSuccess(true);
+      setTimeout(() => {
+        setShowSuccess(false);
+        setIsSubmitting(false);
+        setName("");
+        setDescription("");
+        closeCreateDashboardModal();
+        router.push(`/workspace/${workspace.id}/dashboard/${dashboard.id}`);
+      }, 700);
+    } catch (err: any) {
+      setError(err.message || "Failed to create dashboard.");
       setIsSubmitting(false);
-      setName("");
-      setDescription("");
-      closeCreateDashboardModal();
-      router.push("/");
-    }, 900);
+    }
   };
 
   return (
@@ -202,6 +224,8 @@ export function CreateDashboardModal() {
                 })}
               </div>
             </div>
+
+            {error && <p className="text-xs text-rose-400">{error}</p>}
 
             {/* Action Buttons */}
             <div className="pt-3 flex items-center justify-end gap-2 border-t border-zinc-800">

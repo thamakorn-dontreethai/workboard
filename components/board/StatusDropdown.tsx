@@ -8,6 +8,8 @@ import { FloatingPanel } from "@/components/board/FloatingPanel";
 interface StatusDropdownProps {
   currentStatus: TaskStatus;
   onStatusChange: (status: TaskStatus) => void;
+  // Read-only: shows the status but can't be opened (no permission to change it).
+  disabled?: boolean;
 }
 
 const statusList: TaskStatus[] = ["in_progress", "blocked", "done", "todo"];
@@ -15,6 +17,7 @@ const statusList: TaskStatus[] = ["in_progress", "blocked", "done", "todo"];
 export function StatusDropdown({
   currentStatus,
   onStatusChange,
+  disabled = false,
 }: StatusDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -33,8 +36,9 @@ export function StatusDropdown({
       <button
         ref={buttonRef}
         type="button"
+        disabled={disabled}
         onClick={() => setIsOpen((v) => !v)}
-        className={`w-full py-1.5 px-2 rounded font-medium text-xs transition-all shadow-xs text-center flex items-center justify-center gap-1 ${currentConfig.bgColor} ${currentConfig.color}`}
+        className={`w-full py-1.5 px-2 rounded font-medium text-xs transition-all shadow-xs text-center flex items-center justify-center gap-1 ${currentConfig.bgColor} ${currentConfig.color} ${disabled ? "cursor-default" : ""}`}
       >
         {!isBlankStatus && (
           <>

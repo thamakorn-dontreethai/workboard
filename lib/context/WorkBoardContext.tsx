@@ -22,10 +22,17 @@ import type {
   Notification,
   PersonalTodo,
   Folder,
+  Dashboard,
+  DashboardWidgetId,
   TaskStatus,
   TaskPriority,
 } from "@/types";
 import { GROUP_COLOR_PALETTE } from "@/types";
+import {
+  resolveBoardRole,
+  roleCan,
+  type BoardAction,
+} from "@/lib/utils/permissions";
 import {
   MOCK_USERS,
   DEFAULT_USER,
@@ -104,7 +111,7 @@ interface WorkBoardContextType {
   switchUser: (userId: string) => void;
 
   // Actions - Tasks & Items
-  assignTask: (taskId: string, newAssigneeId: string | null) => void;
+  assignTask: (taskId: string, newAssigneeIds: string[]) => void;
   updateTaskStatus: (taskId: string, status: TaskStatus) => void;
   updateTaskPriority: (taskId: string, priority: TaskPriority) => void;
   updateTaskDueDate: (taskId: string, dueDate: Date | null) => void;
@@ -122,7 +129,7 @@ interface WorkBoardContextType {
     description?: string;
     boardId: string;
     groupId: string;
-    assigneeId?: string | null;
+    assigneeIds?: string[];
     priority?: TaskPriority;
     status?: TaskStatus;
     dueDate?: Date | null;
@@ -148,7 +155,13 @@ interface WorkBoardContextType {
   // Actions - Subtasks & Comments
   toggleSubtask: (subtaskId: string) => void;
   addSubtask: (taskId: string, title: string) => Promise<void>;
-  addComment: (taskId: string, content: string) => Promise<void>;
+  addComment: (
+    taskId: string,
+    content: string,
+    attachments?: { name: string; size: number; mimeType: string; url: string }[]
+  ) => Promise<void>;
+  editComment: (commentId: string, content: string) => Promise<void>;
+  deleteComment: (commentId: string) => Promise<void>;
 
   // Actions - Members & Workspace
   inviteMember: (member: {
@@ -188,6 +201,13 @@ interface WorkBoardContextType {
   openTaskModal: (taskId: string, tab?: "details" | "activity") => void;
   closeTaskModal: () => void;
   openCreateTaskModal: (boardId?: string, groupId?: string, defaultDueDate?: Date | null) => void;
+
+  // Permissions (mirrors the server's rules in lib/utils/permissions.ts).
+  // Use these to hide/disable what the signed-in person can't do; the API
+  // enforces the same rules regardless.
+  canDo: (action: BoardAction, boardId: string, task?: Task) => boolean;
+  // True when the signed-in person is an owner/admin of the active workspace.
+  isWorkspaceLeader: boolean;
   closeCreateTaskModal: () => void;
   openInviteMemberModal: () => void;
   closeInviteMemberModal: () => void;
@@ -224,6 +244,13 @@ interface WorkBoardContextType {
   toggleFolderCollapse: (folderId: string) => void;
   emptyFolder: (folderId: string) => void;
   deleteFolder: (folderId: string) => void;
+  dashboards: Dashboard[];
+  createDashboard: (data: {
+    name: string;
+    description?: string;
+    widgets?: DashboardWidgetId[];
+  }) => Promise<Dashboard>;
+  deleteDashboard: (dashboardId: string) => void;
 
   // Board Specific Invitation Modal
   isInviteBoardModalOpen: boolean;
@@ -241,6 +268,12 @@ interface WorkBoardContextType {
     emailDelivery?: any;
   }>;
   acceptBoardInvite: (token: string) => Promise<boolean>;
+
+  updateNotificationPreferences: (updates: {
+    notifyPostLikes?: boolean;
+    notifyPostComments?: boolean;
+    notifyNewPosts?: boolean;
+  }) => Promise<void>;
 
   // Computed Selectors
   getUserById: (id: string) => User | undefined;
@@ -265,6 +298,24 @@ const STORAGE_KEY = "workboard_state_v5";
 // per-browser convenience remembering which workspace tab was last open,
 // so a refresh doesn't always dump you back on the first one.
 const ACTIVE_WORKSPACE_KEY = "workboard_active_workspace_id";
+
+// Stand-in for "this user has no workspace at all" (a brand-new,
+// not-yet-invited account, or right after logging out). `id: ""` can
+// never collide with a real workspace id, so anything that filters
+// boards/folders/activities by `workspaceId === workspace.id` naturally
+// comes up empty instead of accidentally matching whatever workspace
+// happened to be active before — the bug this used to have.
+const EMPTY_WORKSPACE: Workspace = {
+  id: "",
+  name: "No Workspace",
+  description: "",
+  plan: "Free",
+  privacy: "closed",
+  avatarColor: "bg-zinc-600",
+  isPinned: false,
+  members: [],
+  createdAt: new Date(),
+};
 
 const DUMMY_USER_IDS = ["user-1", "user-2", "user-3", "user-4", "user-5", "user-6"];
 const DUMMY_USER_NAMES = ["Alex Morgan", "Sarah Chen", "Marcus Vance", "Elena Rostova", "David Kim", "Priya Patel"];
@@ -317,6 +368,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const [isCreateDashboardOpen, setIsCreateDashboardOpen] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [dashboards, setDashboards] = useState<Dashboard[]>([]);
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   // True once BOTH the localStorage-restore effect and the database fetch
@@ -336,21 +388,38 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
+    // A single failed request (dev-server recompile, cold serverless start,
+    // brief DB hiccup) used to leave that slice empty until the next manual
+    // refresh — e.g. every comment "vanishing". Retry once before giving up.
+    async function fetchSlice(url: string) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const json = await fetch(url).then((r) => r.json());
+          if (json?.success) return json;
+        } catch {
+          // fall through to the retry
+        }
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 600));
+      }
+      return null;
+    }
+
     async function hydrateFromServer() {
       try {
         // Workspaces are hydrated separately, once the signed-in user is
         // known — see the per-user effect below. Fetching them here
         // unconditionally used to return every workspace in the database,
         // including ones this user was never invited to.
-        const [boardsRes, groupsRes, tasksRes, commentsRes, subtasksRes, activitiesRes, foldersRes] =
+        const [boardsRes, groupsRes, tasksRes, commentsRes, subtasksRes, activitiesRes, foldersRes, dashboardsRes] =
           await Promise.all([
-            fetch("/api/boards").then((r) => r.json()).catch(() => null),
-            fetch("/api/groups").then((r) => r.json()).catch(() => null),
-            fetch("/api/tasks").then((r) => r.json()).catch(() => null),
-            fetch("/api/comments").then((r) => r.json()).catch(() => null),
-            fetch("/api/subtasks").then((r) => r.json()).catch(() => null),
-            fetch("/api/activities").then((r) => r.json()).catch(() => null),
-            fetch("/api/folders").then((r) => r.json()).catch(() => null),
+            fetchSlice("/api/boards"),
+            fetchSlice("/api/groups"),
+            fetchSlice("/api/tasks"),
+            fetchSlice("/api/comments"),
+            fetchSlice("/api/subtasks"),
+            fetchSlice("/api/activities"),
+            fetchSlice("/api/folders"),
+            fetchSlice("/api/dashboards"),
           ]);
 
         if (cancelled) return;
@@ -369,6 +438,16 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
               ...f,
               createdAt: new Date(f.createdAt),
               updatedAt: new Date(f.updatedAt),
+            }))
+          );
+        }
+
+        if (dashboardsRes?.success && Array.isArray(dashboardsRes.data)) {
+          setDashboards(
+            dashboardsRes.data.map((d: Dashboard) => ({
+              ...d,
+              createdAt: new Date(d.createdAt),
+              updatedAt: new Date(d.updatedAt),
             }))
           );
         }
@@ -453,6 +532,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
             ? list.find((w) => w.id === activeWorkspaceIdHint)
             : undefined;
           setWorkspace(preferred || res.data || list[0]);
+        } else {
+          // This user genuinely has no workspace — without this, `workspace`
+          // keeps whatever was active before (a previous account's, on a
+          // shared browser/tab), and every "current workspace" filter
+          // elsewhere would keep matching it.
+          setWorkspace(EMPTY_WORKSPACE);
         }
       })
       .catch((err) => console.error("Failed to hydrate workspaces:", err));
@@ -507,6 +592,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       setWorkspaces(list);
       if (list.length > 0) {
         setWorkspace((prev) => list.find((w) => w.id === prev.id) || result.data || list[0]);
+      } else {
+        setWorkspace(EMPTY_WORKSPACE);
       }
     } catch (err) {
       console.error("Failed to refresh workspaces:", err);
@@ -668,8 +755,17 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           // unless they registered via an invite link and then accept it,
           // in which case that workspace shows up once accepted). The
           // "Add workspace" / "Browse all" actions in the sidebar are how
-          // they create or discover one from here.
+          // they create or discover one from here. Also reset `workspace`
+          // itself (not just the list) — otherwise it keeps whatever was
+          // active before this account registered, e.g. someone else's
+          // workspace left over from a previous session on this browser.
           setWorkspaces([]);
+          setWorkspace(EMPTY_WORKSPACE);
+          try {
+            localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+          } catch {
+            // ignore — localStorage unavailable
+          }
 
           // Persist auth session to localStorage
           persistState(newUsers, workspace, tasks, activities, notifications, newUser, groups, boards, true);
@@ -684,11 +780,21 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    // Clear the signed session cookie too (it's HttpOnly, so only the server can).
+    fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setIsAuthenticated(false);
     setCurrentUser(DEFAULT_USER);
+    // This used to leave `workspace`/`workspaces` untouched, so the next
+    // person to sign in on this browser/tab (a different, unrelated
+    // account) would see whatever workspace the previous session had
+    // open — its boards, folders, and activity — until something else
+    // happened to overwrite it.
+    setWorkspaces([]);
+    setWorkspace(EMPTY_WORKSPACE);
     // Clear auth session from localStorage
     try {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
     } catch {
       // ignore
     }
@@ -710,52 +816,115 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     [users]
   );
 
+  // The browser remembers "logged in" in localStorage, but API permissions
+  // come from a signed cookie. If the two disagree (e.g. a login from before
+  // the cookie existed, or an expired one), sign out so the person logs in
+  // again instead of hitting silent "not allowed" errors.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    fetch("/api/auth/session")
+      .then((res) => {
+        if (!cancelled && res.status === 401) logout();
+      })
+      .catch(() => {
+        // Offline / transient — keep the local session; the API still guards writes.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, logout]);
+
+  const canDo = useCallback(
+    (action: BoardAction, boardId: string, task?: Task) => {
+      const board = boards.find((b) => b.id === boardId);
+      if (!board) return false;
+      const ws =
+        workspaces.find((w) => w.id === board.workspaceId) ??
+        (workspace.id === board.workspaceId ? workspace : undefined);
+      return roleCan(resolveBoardRole(currentUser.id, board, ws), action, task, currentUser.id);
+    },
+    [boards, workspaces, workspace, currentUser.id]
+  );
+
+  const isWorkspaceLeader = workspace.members.some(
+    (m) => m.userId === currentUser.id && (m.role === "owner" || m.role === "admin")
+  );
+
+  const updateNotificationPreferences = useCallback(
+    async (updates: {
+      notifyPostLikes?: boolean;
+      notifyPostComments?: boolean;
+      notifyNewPosts?: boolean;
+    }) => {
+      const updatedUser: User = { ...currentUser, ...updates };
+      setCurrentUser(updatedUser);
+      const updatedUsers = users.map((u) => (u.id === currentUser.id ? updatedUser : u));
+      setUsers(updatedUsers);
+      persistState(updatedUsers, workspace, tasks, activities, notifications, updatedUser);
+
+      try {
+        const res = await fetch(`/api/users/${currentUser.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        });
+        const result = await res.json();
+        if (!result?.success) throw new Error(result?.error);
+      } catch (err) {
+        console.error("Failed to save notification preferences:", err);
+      }
+    },
+    [currentUser, users, workspace, tasks, activities, notifications, persistState]
+  );
+
   const assignTask = useCallback(
-    (taskId: string, newAssigneeId: string | null) => {
+    (taskId: string, newAssigneeIds: string[]) => {
       const targetTask = tasks.find((t) => t.id === taskId);
       if (!targetTask) return;
 
-      const previousAssignee = targetTask.assigneeId
-        ? users.find((u) => u.id === targetTask.assigneeId)
-        : null;
-      const newAssignee = newAssigneeId
-        ? users.find((u) => u.id === newAssigneeId)
-        : null;
+      const previousIds = targetTask.assigneeIds || [];
+      const addedIds = newAssigneeIds.filter((id) => !previousIds.includes(id));
+      const removedIds = previousIds.filter((id) => !newAssigneeIds.includes(id));
+      const addedUsers = users.filter((u) => addedIds.includes(u.id));
+      const removedUsers = users.filter((u) => removedIds.includes(u.id));
 
       const updatedTasks = tasks.map((t) =>
         t.id === taskId
           ? {
               ...t,
-              assigneeId: newAssigneeId,
+              assigneeIds: newAssigneeIds,
               updatedAt: new Date(),
             }
           : t
       );
 
-      const activityText = newAssignee
-        ? previousAssignee
-          ? `reassigned this item from ${previousAssignee.name} to ${newAssignee.name}`
-          : `assigned this item to ${newAssignee.name}`
-        : `unassigned this item`;
+      const parts: string[] = [];
+      if (addedUsers.length) parts.push(`assigned to ${addedUsers.map((u) => u.name).join(", ")}`);
+      if (removedUsers.length) parts.push(`removed ${removedUsers.map((u) => u.name).join(", ")}`);
 
-      const newActivity: Activity = {
-        id: `act-${Date.now()}`,
-        taskId,
-        boardId: targetTask.boardId,
-        actorId: currentUser.id,
-        type: "assignee_changed",
-        description: activityText,
-        createdAt: new Date(),
-      };
+      let updatedActivities = activities;
+      if (parts.length > 0) {
+        const newActivity: Activity = {
+          id: `act-${Date.now()}`,
+          taskId,
+          boardId: targetTask.boardId,
+          actorId: currentUser.id,
+          type: "assignee_changed",
+          description: parts.join("; "),
+          createdAt: new Date(),
+        };
+        updatedActivities = [newActivity, ...activities];
+      }
 
-      const updatedActivities = [newActivity, ...activities];
-
-      let updatedNotifications = [...notifications];
-      if (newAssignee && newAssignee.id !== currentUser.id) {
-        const board = boards.find((b) => b.id === targetTask.boardId);
-        const newNotif: Notification = {
-          id: `notif-${Date.now()}`,
-          userId: newAssignee.id,
+      // Only the newly-added people get notified, and never the person
+      // making the change — matches the server-side assignTask behavior.
+      const board = boards.find((b) => b.id === targetTask.boardId);
+      const newNotifs: Notification[] = addedUsers
+        .filter((u) => u.id !== currentUser.id)
+        .map((u) => ({
+          id: `notif-${Date.now()}-${u.id}`,
+          userId: u.id,
           type: "assignment",
           title: `${currentUser.name} assigned you a task`,
           body: `${targetTask.title}${board ? ` · ${board.name}` : ""}`,
@@ -763,9 +932,9 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           boardId: targetTask.boardId,
           isRead: false,
           createdAt: new Date(),
-        };
-        updatedNotifications = [newNotif, ...notifications];
-      }
+        }));
+      const updatedNotifications =
+        newNotifs.length > 0 ? [...newNotifs, ...notifications] : notifications;
 
       setTasks(updatedTasks);
       setActivities(updatedActivities);
@@ -782,7 +951,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       fetch(`/api/tasks/${taskId}/assign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assigneeId: newAssigneeId, actorId: currentUser.id }),
+        body: JSON.stringify({ assigneeIds: newAssigneeIds, actorId: currentUser.id }),
       }).catch((err) => console.error("Failed to persist assignee:", err));
     },
     [
@@ -1033,7 +1202,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       description?: string;
       boardId: string;
       groupId: string;
-      assigneeId?: string | null;
+      assigneeIds?: string[];
       priority?: TaskPriority;
       status?: TaskStatus;
       dueDate?: Date | null;
@@ -1053,7 +1222,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           description: newTaskData.description || "",
           boardId: newTaskData.boardId,
           groupId: newTaskData.groupId,
-          assigneeId: newTaskData.assigneeId || null,
+          assigneeIds: newTaskData.assigneeIds || [],
           priority: newTaskData.priority || "medium",
           status,
           dueDate: newTaskData.dueDate || null,
@@ -1442,13 +1611,21 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addComment = useCallback(
-    async (taskId: string, content: string) => {
-      if (!content.trim()) return;
+    async (
+      taskId: string,
+      content: string,
+      attachments: { name: string; size: number; mimeType: string; url: string }[] = []
+    ) => {
+      if (!content.trim() && attachments.length === 0) return;
 
       const res = await fetch(`/api/tasks/${taskId}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: content.trim(), authorId: currentUser.id }),
+        body: JSON.stringify({
+          content: content.trim(),
+          attachments,
+          authorId: currentUser.id,
+        }),
       });
       const result = await res.json();
       if (!result?.success || !result?.data) {
@@ -1473,6 +1650,50 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       setActivities((prev) => [newActivity, ...prev]);
     },
     [currentUser, tasks]
+  );
+
+  const editComment = useCallback(
+    async (commentId: string, content: string) => {
+      if (!content.trim()) return;
+
+      const res = await fetch(`/api/comments/${commentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: content.trim(), authorId: currentUser.id }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) {
+        throw new Error(result?.error || "Failed to edit comment");
+      }
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === commentId
+            ? {
+                ...c,
+                content: result.data.content,
+                isEdited: true,
+                updatedAt: new Date(result.data.updatedAt),
+              }
+            : c
+        )
+      );
+    },
+    [currentUser]
+  );
+
+  const deleteComment = useCallback(
+    async (commentId: string) => {
+      const res = await fetch(
+        `/api/comments/${commentId}?authorId=${encodeURIComponent(currentUser.id)}`,
+        { method: "DELETE" }
+      );
+      const result = await res.json();
+      if (!result?.success) {
+        throw new Error(result?.error || "Failed to delete comment");
+      }
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    },
+    [currentUser]
   );
 
   const inviteMember = useCallback(
@@ -1589,7 +1810,23 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   // localStorage, since persistState no longer writes workspace data.
   const removeMembers = useCallback(
     async (userIds: string[]) => {
-      const idSet = new Set(userIds.filter((id) => id !== currentUser.id));
+      // Only the owner/admin may remove members, and the owner can never
+      // be removed this way (there's no ownership-transfer flow yet, so
+      // that would leave the workspace without one) — this used to only
+      // guard against removing yourself, which let any member, including
+      // a plain "member", remove the owner.
+      const callerRole = workspace.members.find((m) => m.userId === currentUser.id)?.role;
+      if (callerRole !== "owner" && callerRole !== "admin") {
+        console.error("Only the workspace owner or an admin can remove members.");
+        return;
+      }
+
+      const ownerIds = new Set(
+        workspace.members.filter((m) => m.role === "owner").map((m) => m.userId)
+      );
+      const idSet = new Set(
+        userIds.filter((id) => id !== currentUser.id && !ownerIds.has(id))
+      );
       if (idSet.size === 0) return;
 
       const updatedMembers = workspace.members.filter((m) => !idSet.has(m.userId));
@@ -1794,6 +2031,55 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, [isAuthenticated, currentUser?.id, personalTodos, updatePersonalTodo]);
 
+  // ─── Workspace Appointment Reminders ───────────────────────────────────
+  // Unlike personal to-dos, appointments are shared — the server creates a
+  // Notification row + sends an email for every attendee, not just this
+  // client's user. There's no cron in this app, so any authenticated client
+  // with a workspace open periodically asks the server "is anything due?";
+  // the server-side claim in checkAndSendAppointmentReminders keeps two
+  // clients polling at once from double-sending. This tab still merges its
+  // own resulting notifications in immediately for instant feedback.
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser?.id || !workspace.id) return;
+
+    const checkAppointmentReminders = () => {
+      fetch("/api/appointments/check-reminders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: workspace.id }),
+      })
+        .then((r) => r.json())
+        .then((res) => {
+          if (!res?.success || !Array.isArray(res.data?.notifications)) return;
+          const mine: Notification[] = res.data.notifications
+            .filter((n: Notification) => n.userId === currentUser.id)
+            .map((n: Notification) => ({ ...n, createdAt: new Date(n.createdAt) }));
+          if (mine.length === 0) return;
+
+          setNotifications((prev) => {
+            const existingIds = new Set(prev.map((n) => n.id));
+            const fresh = mine.filter((n) => !existingIds.has(n.id));
+            return fresh.length > 0 ? [...fresh, ...prev] : prev;
+          });
+
+          if (
+            typeof window !== "undefined" &&
+            "Notification" in window &&
+            Notification.permission === "granted"
+          ) {
+            mine.forEach((n) => {
+              new Notification(n.title, { body: n.body });
+            });
+          }
+        })
+        .catch((err) => console.error("Failed to check appointment reminders:", err));
+    };
+
+    checkAppointmentReminders();
+    const interval = setInterval(checkAppointmentReminders, 30000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, currentUser?.id, workspace.id]);
+
   const openTaskModal = useCallback(
     (taskId: string, tab: "details" | "activity" = "details") => {
       setActiveTaskId(taskId);
@@ -1808,12 +2094,17 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const openCreateTaskModal = useCallback(
     (boardId?: string, groupId?: string, defaultDueDate?: Date | null) => {
+      // Creating items is leader-only; don't open a form that will be refused.
+      const allowed = boardId
+        ? canDo("manage", boardId)
+        : boards.some((b) => canDo("manage", b.id));
+      if (!allowed) return;
       setCreateTaskDefaultBoardId(boardId);
       setCreateTaskDefaultGroupId(groupId);
       setCreateTaskDefaultDueDate(defaultDueDate);
       setIsCreateTaskOpen(true);
     },
-    []
+    [boards, canDo]
   );
 
   const closeCreateTaskModal = useCallback(() => {
@@ -2070,6 +2361,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           // ignore — localStorage unavailable
         }
       } else {
+        setWorkspace(EMPTY_WORKSPACE);
         try {
           localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
         } catch {
@@ -2102,6 +2394,9 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const createFolder = useCallback(
     async (name: string, color?: string): Promise<Folder> => {
+      if (!workspace.id) {
+        throw new Error("Create or join a workspace before adding a folder.");
+      }
       const res = await fetch("/api/folders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2176,6 +2471,48 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  const createDashboard = useCallback(
+    async (data: {
+      name: string;
+      description?: string;
+      widgets?: DashboardWidgetId[];
+    }): Promise<Dashboard> => {
+      if (!workspace.id) {
+        throw new Error("Create or join a workspace before adding a dashboard.");
+      }
+      const res = await fetch("/api/dashboards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: workspace.id,
+          name: data.name,
+          description: data.description,
+          widgets: data.widgets,
+          createdById: currentUser.id,
+        }),
+      });
+      const result = await res.json();
+      if (!result?.success || !result?.data) {
+        throw new Error(result?.error || "Failed to create dashboard");
+      }
+      const newDashboard: Dashboard = {
+        ...result.data,
+        createdAt: new Date(result.data.createdAt),
+        updatedAt: new Date(result.data.updatedAt),
+      };
+      setDashboards((prev) => [...prev, newDashboard]);
+      return newDashboard;
+    },
+    [workspace.id, currentUser.id]
+  );
+
+  const deleteDashboard = useCallback((dashboardId: string) => {
+    setDashboards((prev) => prev.filter((d) => d.id !== dashboardId));
+    fetch(`/api/dashboards/${dashboardId}`, { method: "DELETE" }).catch((err) =>
+      console.error("Failed to delete dashboard:", err)
+    );
+  }, []);
+
   const createBoard = useCallback(
     async (data: {
       name: string;
@@ -2185,6 +2522,15 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       privacy?: BoardPrivacy;
       itemLabel?: string;
     }): Promise<Board> => {
+      // Refuse outright if there's no real active workspace to attach
+      // this to (the "No Workspace" placeholder used while a brand-new
+      // account has none yet) — every UI entry point that creates a board
+      // should already be hiding/disabling itself in that state, but this
+      // is the backstop in case another one doesn't.
+      if (!workspace.id) {
+        throw new Error("Create or join a workspace before adding a board.");
+      }
+
       const res = await fetch("/api/boards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2357,7 +2703,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     (userId: string) =>
       tasks.filter(
         (t) =>
-          t.assigneeId === userId &&
+          t.assigneeIds.includes(userId) &&
           !t.isArchived &&
           t.status !== "done" &&
           t.status !== "cancelled"
@@ -2382,7 +2728,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const getMyTasks = useCallback(() => {
     return tasks.filter(
       (t) =>
-        t.assigneeId === currentUser.id &&
+        t.assigneeIds.includes(currentUser.id) &&
         !t.isArchived &&
         t.status !== "done" &&
         t.status !== "cancelled"
@@ -2391,7 +2737,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const getWorkspaceStats = useCallback(() => {
     const userTasks = tasks.filter(
-      (t) => t.assigneeId === currentUser.id && !t.isArchived
+      (t) => t.assigneeIds.includes(currentUser.id) && !t.isArchived
     );
     return {
       totalAssigned: userTasks.length,
@@ -2488,6 +2834,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       toggleSubtask,
       addSubtask,
       addComment,
+      editComment,
+      deleteComment,
 
       inviteMember,
       updateMemberRole,
@@ -2509,6 +2857,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       closeCreateTaskModal,
       openInviteMemberModal,
       closeInviteMemberModal,
+      canDo,
+      isWorkspaceLeader,
 
       // Board, Folder & Dashboard
       isCreateBoardOpen,
@@ -2529,6 +2879,9 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       toggleFolderCollapse,
       emptyFolder,
       deleteFolder,
+      dashboards,
+      createDashboard,
+      deleteDashboard,
 
       isInviteBoardModalOpen,
       inviteBoardId,
@@ -2536,6 +2889,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       closeInviteBoardModal,
       inviteToBoard,
       acceptBoardInvite,
+
+      updateNotificationPreferences,
 
       getUserById,
       getTasksByAssignee,
@@ -2595,6 +2950,9 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       toggleFolderCollapse,
       emptyFolder,
       deleteFolder,
+      dashboards,
+      createDashboard,
+      deleteDashboard,
       isInviteBoardModalOpen,
       inviteBoardId,
       openInviteBoardModal,
@@ -2629,6 +2987,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       toggleSubtask,
       addSubtask,
       addComment,
+      editComment,
+      deleteComment,
       inviteMember,
       updateMemberRole,
       removeMember,
@@ -2646,6 +3006,9 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       closeCreateTaskModal,
       openInviteMemberModal,
       closeInviteMemberModal,
+      canDo,
+      isWorkspaceLeader,
+      updateNotificationPreferences,
       getUserById,
       getTasksByAssignee,
       getTasksByBoard,
