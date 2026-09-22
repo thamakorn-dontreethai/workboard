@@ -190,6 +190,12 @@ model Task {
   // task's current dueDate, so the periodic checker doesn't re-notify on
   // every poll. Cleared whenever dueDate changes (see updateTask).
   dueSoonReminderSentAt DateTime?
+  // Separate gate for the "deadline passed without being marked done"
+  // notification — fires once, independently of the due-soon reminder
+  // above, so missing a deadline still gets its own alert even if the
+  // due-soon nudge already fired earlier for the same dueDate. Cleared
+  // whenever dueDate changes, same as dueSoonReminderSentAt.
+  overdueReminderSentAt DateTime?
   category    String     @default("General")
   order       Int        @default(0)
   isArchived  Boolean    @default(false)

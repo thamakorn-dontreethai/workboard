@@ -3,7 +3,12 @@ import path from "path";
 import { prisma } from "./prisma";
 import { sendAppointmentReminderEmail } from "./email";
 import { hashPassword, verifyPassword } from "./auth";
-import { generateLineLinkCode, LINE_LINK_CODE_TTL_MS, sendLinePushMessage } from "./line";
+import {
+  generateLineLinkCode,
+  LINE_LINK_CODE_TTL_MS,
+  sendLineTaskNotification,
+  buildTaskLink,
+} from "./line";
 import type { CommentAttachment } from "@/types";
 import {
   Workspace,
@@ -1321,6 +1326,7 @@ export async function updateTask(
           ...(updates.dueDate !== undefined && {
             dueDate: updates.dueDate,
             dueSoonReminderSentAt: null,
+            overdueReminderSentAt: null,
           } as any),
           ...(updates.category && { category: updates.category }),
           ...(updates.groupId && { groupId: updates.groupId }),
@@ -1416,7 +1422,7 @@ export async function assignTask(
       const updated = await prisma.task.update({
         where: { id: taskId },
         data: { assigneeIds: newAssigneeIds },
-        include: { subtasks: true, comments: true, activities: true },
+        include: { subtasks: true, comments: true, activities: true, board: { select: { name: true } } },
       });
 
       const effectiveActorId = actorId || updated.reporterId;
@@ -1473,10 +1479,15 @@ export async function assignTask(
           addedUsers
             .filter((u) => u.id !== effectiveActorId && (u as any).lineUserId)
             .map((u) =>
-              sendLinePushMessage(
-                (u as any).lineUserId,
-                `📋 คุณได้รับมอบหมายงานใหม่\n"${updated.title}"`
-              ).catch(() => {})
+              sendLineTaskNotification((u as any).lineUserId, {
+                headerColor: "#0073EA",
+                headerLabel: "งานใหม่ที่ได้รับมอบหมาย",
+                emoji: "📋",
+                taskTitle: updated.title,
+                boardName: (updated as any).board?.name,
+                link: buildTaskLink(updated.id),
+                altText: `งานใหม่ที่ได้รับมอบหมาย: ${updated.title}`,
+              }).catch(() => {})
             )
         );
       }
@@ -3017,35 +3028,41 @@ export async function checkAndSendAppointmentReminders(
   return { remindedAppointments, notifications: createdNotifications };
 }
 
-// Tasks due within this window (including already-overdue ones) get a
-// one-time "due soon" nudge — in-app + LINE for whoever has it linked.
-// dueSoonReminderSentAt gates it so the same task doesn't re-notify on
-// every poll; changing the due date clears that gate (see updateTask).
+// Two independent one-time nudges per task — in-app + LINE for whoever has
+// it linked:
+//   1. "Due soon"  — fires once the due date enters this window, while it's
+//      still in the future.
+//   2. "Missed deadline" — fires once the due date actually passes without
+//      the task being done. Separate gate field from due-soon, so getting
+//      the "due soon" nudge earlier doesn't suppress this one — missing the
+//      deadline is a distinct event worth its own alert.
+// Both gates are cleared whenever dueDate changes (see updateTask), and
+// each is claimed atomically so two clients polling at once can't double-send.
 const DUE_SOON_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-export async function checkAndSendTaskDueSoonReminders(
-  workspaceId: string
+async function runTaskReminderPass(
+  boardIds: string[],
+  now: Date,
+  opts: {
+    gateField: "dueSoonReminderSentAt" | "overdueReminderSentAt";
+    dueDateWhere: any;
+    buildTitle: (title: string) => string;
+    buildBody: (dueLabel: string) => string;
+    headerColor: string;
+    headerLabel: string;
+    emoji: string;
+    statusNote?: string;
+  }
 ): Promise<{ remindedTaskIds: string[]; notifications: Notification[] }> {
-  if (!isPrismaEnabled) return { remindedTaskIds: [], notifications: [] };
-
-  const boards = await prisma.board.findMany({
-    where: { workspaceId, isArchived: false },
-    select: { id: true },
-  });
-  const boardIds = boards.map((b) => b.id);
-  if (boardIds.length === 0) return { remindedTaskIds: [], notifications: [] };
-
-  const now = new Date();
-  const dueBefore = new Date(now.getTime() + DUE_SOON_WINDOW_MS);
-
   const candidates = await prisma.task.findMany({
     where: {
       boardId: { in: boardIds },
       isArchived: false,
       status: { notIn: ["done", "cancelled"] },
-      dueDate: { not: null, lte: dueBefore },
-      ...( { dueSoonReminderSentAt: null } as any),
+      dueDate: opts.dueDateWhere,
+      ...({ [opts.gateField]: null } as any),
     },
+    include: { board: { select: { name: true } } },
   });
   if (candidates.length === 0) return { remindedTaskIds: [], notifications: [] };
 
@@ -3057,11 +3074,9 @@ export async function checkAndSendTaskDueSoonReminders(
   const createdNotifications: Notification[] = [];
 
   for (const task of candidates) {
-    // Atomically claim it so a second client polling at the same moment
-    // doesn't send duplicate reminders for the same task.
     const claim = await prisma.task.updateMany({
-      where: { id: task.id, ...( { dueSoonReminderSentAt: null } as any) },
-      data: { dueSoonReminderSentAt: now } as any,
+      where: { id: task.id, ...({ [opts.gateField]: null } as any) },
+      data: { [opts.gateField]: now } as any,
     });
     if (claim.count === 0) continue;
 
@@ -3071,7 +3086,6 @@ export async function checkAndSendTaskDueSoonReminders(
       hour: "2-digit",
       minute: "2-digit",
     });
-    const overdue = task.dueDate!.getTime() < now.getTime();
 
     for (const assigneeId of task.assigneeIds) {
       const user = usersById.get(assigneeId);
@@ -3080,11 +3094,11 @@ export async function checkAndSendTaskDueSoonReminders(
       try {
         const notif = await prisma.notification.create({
           data: {
-            id: `notif-due-${task.id}-${assigneeId}`,
+            id: `notif-${opts.gateField}-${task.id}-${assigneeId}`,
             userId: assigneeId,
             type: "due_date",
-            title: overdue ? `Overdue: ${task.title}` : `Due soon: ${task.title}`,
-            body: overdue ? `Was due ${dueLabel}` : `Due ${dueLabel}`,
+            title: opts.buildTitle(task.title),
+            body: opts.buildBody(dueLabel),
             taskId: task.id,
             boardId: task.boardId,
           },
@@ -3106,12 +3120,17 @@ export async function checkAndSendTaskDueSoonReminders(
 
       const lineUserId = (user as any).lineUserId;
       if (lineUserId) {
-        sendLinePushMessage(
-          lineUserId,
-          overdue
-            ? `⚠️ งานเลยกำหนดแล้ว\n"${task.title}"\nกำหนดส่ง: ${dueLabel}`
-            : `⏰ งานใกล้ถึงกำหนด\n"${task.title}"\nกำหนดส่ง: ${dueLabel}`
-        ).catch(() => {});
+        sendLineTaskNotification(lineUserId, {
+          headerColor: opts.headerColor,
+          headerLabel: opts.headerLabel,
+          emoji: opts.emoji,
+          taskTitle: task.title,
+          boardName: (task as any).board?.name,
+          dueLabel,
+          statusNote: opts.statusNote,
+          link: buildTaskLink(task.id),
+          altText: `${opts.headerLabel}: ${task.title}`,
+        }).catch(() => {});
       }
     }
 
@@ -3119,6 +3138,49 @@ export async function checkAndSendTaskDueSoonReminders(
   }
 
   return { remindedTaskIds, notifications: createdNotifications };
+}
+
+export async function checkAndSendTaskDueSoonReminders(
+  workspaceId: string
+): Promise<{ remindedTaskIds: string[]; notifications: Notification[] }> {
+  if (!isPrismaEnabled) return { remindedTaskIds: [], notifications: [] };
+
+  const boards = await prisma.board.findMany({
+    where: { workspaceId, isArchived: false },
+    select: { id: true },
+  });
+  const boardIds = boards.map((b) => b.id);
+  if (boardIds.length === 0) return { remindedTaskIds: [], notifications: [] };
+
+  const now = new Date();
+  const dueBefore = new Date(now.getTime() + DUE_SOON_WINDOW_MS);
+
+  const [dueSoon, overdue] = await Promise.all([
+    runTaskReminderPass(boardIds, now, {
+      gateField: "dueSoonReminderSentAt",
+      dueDateWhere: { not: null, gt: now, lte: dueBefore },
+      buildTitle: (title) => `Due soon: ${title}`,
+      buildBody: (dueLabel) => `Due ${dueLabel}`,
+      headerColor: "#F59E0B",
+      headerLabel: "งานใกล้ถึงกำหนดส่ง",
+      emoji: "⏰",
+    }),
+    runTaskReminderPass(boardIds, now, {
+      gateField: "overdueReminderSentAt",
+      dueDateWhere: { not: null, lte: now },
+      buildTitle: (title) => `Missed deadline: ${title}`,
+      buildBody: (dueLabel) => `Was due ${dueLabel} — not marked done`,
+      headerColor: "#E11D48",
+      headerLabel: "งานเลยกำหนดส่ง",
+      emoji: "❌",
+      statusNote: "ยังไม่เสร็จสิ้น",
+    }),
+  ]);
+
+  return {
+    remindedTaskIds: [...dueSoon.remindedTaskIds, ...overdue.remindedTaskIds],
+    notifications: [...dueSoon.notifications, ...overdue.notifications],
+  };
 }
 
 // ─── Dashboards (saved analytics report views over a workspace) ───────────

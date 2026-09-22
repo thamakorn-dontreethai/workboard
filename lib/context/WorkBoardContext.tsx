@@ -7,6 +7,7 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
 } from "react";
 import type {
   User,
@@ -395,6 +396,27 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const [isServerHydrated, setIsServerHydrated] = useState<boolean>(false);
   const isHydrated = isLocalHydrated && isServerHydrated;
 
+  // Polling re-fetches everything every POLL_INTERVAL_MS (see below), but
+  // most ticks find nothing changed — calling setState with a freshly
+  // .map()'d array anyway would still give every consumer a new reference
+  // and force a full re-render cascade for no reason, which is what made
+  // the whole app feel like it stutters on a timer. These refs hold the
+  // last-seen raw JSON per slice so each poll can skip the setState (and
+  // the date-object remapping) entirely when the server's answer is
+  // byte-for-byte the same as what's already on screen.
+  const lastRawJsonRef = useRef<Record<string, string>>({});
+  function applyIfChanged<T>(
+    key: string,
+    rawData: unknown,
+    setter: (v: T) => void,
+    map: (rawData: any) => T
+  ) {
+    const raw = JSON.stringify(rawData);
+    if (lastRawJsonRef.current[key] === raw) return;
+    lastRawJsonRef.current[key] = raw;
+    setter(map(rawData));
+  }
+
   // ─── Workspaces, boards, groups, tasks, comments, subtasks, activities:
   // hydrate from the database ─────────────────────────────────────────────
   // None of these are read from localStorage anymore — the database is the
@@ -440,16 +462,16 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
 
         if (boardsRes?.success && Array.isArray(boardsRes.data)) {
-          setBoards(boardsRes.data);
+          applyIfChanged("boards", boardsRes.data, setBoards, (d) => d);
         }
 
         if (groupsRes?.success && Array.isArray(groupsRes.data)) {
-          setGroups(groupsRes.data);
+          applyIfChanged("groups", groupsRes.data, setGroups, (d) => d);
         }
 
         if (foldersRes?.success && Array.isArray(foldersRes.data)) {
-          setFolders(
-            foldersRes.data.map((f: Folder) => ({
+          applyIfChanged("folders", foldersRes.data, setFolders, (d) =>
+            d.map((f: Folder) => ({
               ...f,
               createdAt: new Date(f.createdAt),
               updatedAt: new Date(f.updatedAt),
@@ -458,18 +480,18 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (dashboardsRes?.success && Array.isArray(dashboardsRes.data)) {
-          setDashboards(
-            dashboardsRes.data.map((d: Dashboard) => ({
-              ...d,
-              createdAt: new Date(d.createdAt),
-              updatedAt: new Date(d.updatedAt),
+          applyIfChanged("dashboards", dashboardsRes.data, setDashboards, (d) =>
+            d.map((x: Dashboard) => ({
+              ...x,
+              createdAt: new Date(x.createdAt),
+              updatedAt: new Date(x.updatedAt),
             }))
           );
         }
 
         if (tasksRes?.success && Array.isArray(tasksRes.data)) {
-          setTasks(
-            tasksRes.data.map((t: Task) => ({
+          applyIfChanged("tasks", tasksRes.data, setTasks, (d) =>
+            d.map((t: Task) => ({
               ...t,
               dueDate: t.dueDate ? new Date(t.dueDate) : null,
               createdAt: new Date(t.createdAt),
@@ -479,8 +501,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (commentsRes?.success && Array.isArray(commentsRes.data)) {
-          setComments(
-            commentsRes.data.map((c: Comment) => ({
+          applyIfChanged("comments", commentsRes.data, setComments, (d) =>
+            d.map((c: Comment) => ({
               ...c,
               createdAt: new Date(c.createdAt),
               updatedAt: new Date(c.updatedAt),
@@ -489,8 +511,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (subtasksRes?.success && Array.isArray(subtasksRes.data)) {
-          setSubtasks(
-            subtasksRes.data.map((s: Subtask) => ({
+          applyIfChanged("subtasks", subtasksRes.data, setSubtasks, (d) =>
+            d.map((s: Subtask) => ({
               ...s,
               dueDate: s.dueDate ? new Date(s.dueDate) : null,
               createdAt: new Date(s.createdAt),
@@ -500,8 +522,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (activitiesRes?.success && Array.isArray(activitiesRes.data)) {
-          setActivities(
-            activitiesRes.data.map((a: Activity) => ({
+          applyIfChanged("activities", activitiesRes.data, setActivities, (d) =>
+            d.map((a: Activity) => ({
               ...a,
               createdAt: new Date(a.createdAt),
             }))
@@ -518,9 +540,17 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") hydrateFromServer();
     }, POLL_INTERVAL_MS);
+    // Coming back to this tab shouldn't mean waiting up to another full
+    // POLL_INTERVAL_MS for whatever changed while it was in the background
+    // — refresh right away instead of on the next scheduled tick.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") hydrateFromServer();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
@@ -546,18 +576,26 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         .then((res) => {
           if (cancelled || !res?.success || !Array.isArray(res.workspaces)) return;
           const list: Workspace[] = res.workspaces;
-          setWorkspaces(list);
+          applyIfChanged("workspaces", list, setWorkspaces, (d) => d);
           if (list.length > 0) {
             const preferred = activeWorkspaceIdHint
               ? list.find((w) => w.id === activeWorkspaceIdHint)
               : undefined;
-            setWorkspace(preferred || res.data || list[0]);
+            const resolved = preferred || res.data || list[0];
+            // Functional form + a content check — this closure is captured
+            // once per effect run (deps: [isAuthenticated, currentUser?.id])
+            // and reused for every interval tick, so comparing against the
+            // `workspace` variable from render-time would compare against a
+            // stale snapshot, not the latest state, and skip real updates.
+            setWorkspace((prev) =>
+              JSON.stringify(prev) === JSON.stringify(resolved) ? prev : resolved
+            );
           } else {
             // This user genuinely has no workspace — without this, `workspace`
             // keeps whatever was active before (a previous account's, on a
             // shared browser/tab), and every "current workspace" filter
             // elsewhere would keep matching it.
-            setWorkspace(EMPTY_WORKSPACE);
+            setWorkspace((prev) => (prev.id === "" ? prev : EMPTY_WORKSPACE));
           }
         })
         .catch((err) => console.error("Failed to hydrate workspaces:", err));
@@ -566,8 +604,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         .then((r) => r.json())
         .then((res) => {
           if (cancelled || !res?.success || !Array.isArray(res.data)) return;
-          setNotifications(
-            res.data.map((n: Notification) => ({
+          applyIfChanged("notifications", res.data, setNotifications, (d) =>
+            d.map((n: Notification) => ({
               ...n,
               createdAt: new Date(n.createdAt),
             }))
@@ -579,8 +617,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         .then((r) => r.json())
         .then((res) => {
           if (cancelled || !res?.success || !Array.isArray(res.data)) return;
-          setPersonalTodos(
-            res.data.map((t: PersonalTodo) => ({
+          applyIfChanged("personalTodos", res.data, setPersonalTodos, (d) =>
+            d.map((t: PersonalTodo) => ({
               ...t,
               dueAt: t.dueAt ? new Date(t.dueAt) : null,
               reminderSentAt: t.reminderSentAt ? new Date(t.reminderSentAt) : null,
@@ -596,10 +634,15 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") hydratePerUser();
     }, POLL_INTERVAL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") hydratePerUser();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [isAuthenticated, currentUser?.id]);
 
