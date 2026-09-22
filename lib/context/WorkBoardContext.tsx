@@ -405,6 +405,15 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   // the date-object remapping) entirely when the server's answer is
   // byte-for-byte the same as what's already on screen.
   const lastRawJsonRef = useRef<Record<string, string>>({});
+  // Every mutation (assign, status/priority/due-date change, create,
+  // move...) calls persistState() as its last step, which stamps this —
+  // so a poll whose *fetch* started before that stamp but whose *response*
+  // arrives after it knows it's holding stale data (from before the
+  // mutation) and skips applying it, instead of overwriting the fresh
+  // optimistic UI and then "snapping back" once the next poll catches up.
+  // This was the visible flicker: assign someone, see it revert, then see
+  // it reappear a few seconds later.
+  const lastLocalMutationAtRef = useRef<number>(0);
   function applyIfChanged<T>(
     key: string,
     rawData: unknown,
@@ -442,6 +451,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     }
 
     async function hydrateFromServer() {
+      const fetchStartedAt = Date.now();
       try {
         // Workspaces are hydrated separately, once the signed-in user is
         // known — see the per-user effect below. Fetching them here
@@ -460,6 +470,13 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           ]);
 
         if (cancelled) return;
+        // A mutation (assign/status/priority/due-date/create/...) landed its
+        // own optimistic update while this fetch was in flight — this
+        // response was already stale the moment it was requested, so
+        // applying it would overwrite the fresher local state and then
+        // "snap back" once the next poll catches up. Skip it; the next
+        // tick will have a fetch that starts after the mutation instead.
+        if (lastLocalMutationAtRef.current > fetchStartedAt) return;
 
         if (boardsRes?.success && Array.isArray(boardsRes.data)) {
           applyIfChanged("boards", boardsRes.data, setBoards, (d) => d);
@@ -564,6 +581,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     function hydratePerUser() {
+      const fetchStartedAt = Date.now();
       let activeWorkspaceIdHint: string | null = null;
       try {
         activeWorkspaceIdHint = localStorage.getItem(ACTIVE_WORKSPACE_KEY);
@@ -575,6 +593,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         .then((r) => r.json())
         .then((res) => {
           if (cancelled || !res?.success || !Array.isArray(res.workspaces)) return;
+          if (lastLocalMutationAtRef.current > fetchStartedAt) return;
           const list: Workspace[] = res.workspaces;
           applyIfChanged("workspaces", list, setWorkspaces, (d) => d);
           if (list.length > 0) {
@@ -604,6 +623,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         .then((r) => r.json())
         .then((res) => {
           if (cancelled || !res?.success || !Array.isArray(res.data)) return;
+          if (lastLocalMutationAtRef.current > fetchStartedAt) return;
           applyIfChanged("notifications", res.data, setNotifications, (d) =>
             d.map((n: Notification) => ({
               ...n,
@@ -617,6 +637,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         .then((r) => r.json())
         .then((res) => {
           if (cancelled || !res?.success || !Array.isArray(res.data)) return;
+          if (lastLocalMutationAtRef.current > fetchStartedAt) return;
           applyIfChanged("personalTodos", res.data, setPersonalTodos, (d) =>
             d.map((t: PersonalTodo) => ({
               ...t,
@@ -728,6 +749,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       authenticated?: boolean,
       _newWorkspaces?: Workspace[]
     ) => {
+      lastLocalMutationAtRef.current = Date.now();
       try {
         localStorage.setItem(
           STORAGE_KEY,

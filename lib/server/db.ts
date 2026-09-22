@@ -1485,6 +1485,7 @@ export async function assignTask(
                 emoji: "📋",
                 taskTitle: updated.title,
                 boardName: (updated as any).board?.name,
+                dueLabel: updated.dueDate ? bangkokDateLabel(updated.dueDate) : undefined,
                 link: buildTaskLink(updated.id),
                 altText: `งานใหม่ที่ได้รับมอบหมาย: ${updated.title}`,
               }).catch(() => {})
