@@ -1797,25 +1797,33 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
             return [...clean, newUser];
           });
 
-          // Dispatch real invitation email for primary board
-          const targetBoardId = boards[0]?.id || "board-1";
+          // Dispatch real invitation email for a board in THIS workspace —
+          // boards[0] used to be picked from the globally-hydrated board
+          // list (every workspace, every user), so it could easily belong
+          // to a workspace the inviter doesn't even manage. authorizeBoard
+          // would then reject the call, silently falling back to a plain
+          // /register link that never actually joins anyone to this
+          // workspace — accepted invites just vanished.
+          const targetBoardId = boards.find((b) => b.workspaceId === workspace.id)?.id;
           let inviteLink = "";
-          try {
-            const inviteRes = await fetch(`/api/boards/${targetBoardId}/invite`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                email: data.email,
-                role: data.role === "admin" ? "Project Lead" : "Member",
-                invitedById: currentUser.id,
-              }),
-            });
-            const inviteJson = await inviteRes.json();
-            if (inviteJson?.data?.inviteLink) {
-              inviteLink = inviteJson.data.inviteLink;
+          if (targetBoardId) {
+            try {
+              const inviteRes = await fetch(`/api/boards/${targetBoardId}/invite`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  email: data.email,
+                  role: data.role === "admin" ? "Project Lead" : "Member",
+                  invitedById: currentUser.id,
+                }),
+              });
+              const inviteJson = await inviteRes.json();
+              if (inviteJson?.data?.inviteLink) {
+                inviteLink = inviteJson.data.inviteLink;
+              }
+            } catch (e) {
+              console.warn("Board invite link fallback:", e);
             }
-          } catch (e) {
-            console.warn("Board invite link fallback:", e);
           }
 
           if (!inviteLink) {
