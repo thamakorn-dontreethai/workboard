@@ -3030,22 +3030,49 @@ export async function checkAndSendAppointmentReminders(
 
 // Two independent one-time nudges per task — in-app + LINE for whoever has
 // it linked:
-//   1. "Due soon"  — fires once the due date enters this window, while it's
-//      still in the future.
-//   2. "Missed deadline" — fires once the due date actually passes without
-//      the task being done. Separate gate field from due-soon, so getting
-//      the "due soon" nudge earlier doesn't suppress this one — missing the
-//      deadline is a distinct event worth its own alert.
+//   1. "Due today"  — fires once the CALENDAR DATE the task is due arrives
+//      (compared in Asia/Bangkok, not a rolling N-hours-before countdown —
+//      that's what people actually mean by "due the 23rd").
+//   2. "Missed deadline" — fires once the calendar date has moved past the
+//      due date without the task being done. Separate gate field from
+//      due-today, so getting that nudge earlier doesn't suppress this one.
 // Both gates are cleared whenever dueDate changes (see updateTask), and
 // each is claimed atomically so two clients polling at once can't double-send.
-const DUE_SOON_WINDOW_MS = 24 * 60 * 60 * 1000;
+//
+// Why Asia/Bangkok specifically: dates picked in the UI are constructed as
+// local midnight (new Date(year, month, day) in the browser, which for a
+// Thai user is UTC+7) and stored as that instant. The reminder checker runs
+// server-side on Vercel, whose runtime clock is UTC — formatting or
+// day-comparing that instant without an explicit timeZone used the server's
+// UTC day instead of the user's, which is why a task due "the 23rd" showed
+// up labeled "the 22nd" and could fire its reminder a day early.
+const BANGKOK_TZ = "Asia/Bangkok";
+
+function bangkokDateKey(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: BANGKOK_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function bangkokDateLabel(date: Date): string {
+  return date.toLocaleDateString("th-TH", {
+    timeZone: BANGKOK_TZ,
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 async function runTaskReminderPass(
   boardIds: string[],
   now: Date,
+  todayKey: string,
   opts: {
     gateField: "dueSoonReminderSentAt" | "overdueReminderSentAt";
-    dueDateWhere: any;
+    matchesDay: (dueDateKey: string, todayKey: string) => boolean;
     buildTitle: (title: string) => string;
     buildBody: (dueLabel: string) => string;
     headerColor: string;
@@ -3054,16 +3081,27 @@ async function runTaskReminderPass(
     statusNote?: string;
   }
 ): Promise<{ remindedTaskIds: string[]; notifications: Notification[] }> {
-  const candidates = await prisma.task.findMany({
+  // Loose SQL prefilter (anything due up through "end of today, Bangkok
+  // time") — the precise same-day/before-today split happens in JS below
+  // via bangkokDateKey, since Prisma can't compare calendar days in a
+  // specific timezone directly.
+  const startOfTomorrowBangkokUTC = new Date(
+    new Date(`${todayKey}T00:00:00+07:00`).getTime() + 24 * 60 * 60 * 1000
+  );
+
+  const allCandidates = await prisma.task.findMany({
     where: {
       boardId: { in: boardIds },
       isArchived: false,
       status: { notIn: ["done", "cancelled"] },
-      dueDate: opts.dueDateWhere,
+      dueDate: { not: null, lt: startOfTomorrowBangkokUTC },
       ...({ [opts.gateField]: null } as any),
     },
     include: { board: { select: { name: true } } },
   });
+  const candidates = allCandidates.filter((t) =>
+    opts.matchesDay(bangkokDateKey(t.dueDate!), todayKey)
+  );
   if (candidates.length === 0) return { remindedTaskIds: [], notifications: [] };
 
   const assigneeIds = Array.from(new Set(candidates.flatMap((t) => t.assigneeIds)));
@@ -3080,12 +3118,7 @@ async function runTaskReminderPass(
     });
     if (claim.count === 0) continue;
 
-    const dueLabel = task.dueDate!.toLocaleString([], {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const dueLabel = bangkokDateLabel(task.dueDate!);
 
     for (const assigneeId of task.assigneeIds) {
       const user = usersById.get(assigneeId);
@@ -3153,21 +3186,21 @@ export async function checkAndSendTaskDueSoonReminders(
   if (boardIds.length === 0) return { remindedTaskIds: [], notifications: [] };
 
   const now = new Date();
-  const dueBefore = new Date(now.getTime() + DUE_SOON_WINDOW_MS);
+  const todayKey = bangkokDateKey(now);
 
   const [dueSoon, overdue] = await Promise.all([
-    runTaskReminderPass(boardIds, now, {
+    runTaskReminderPass(boardIds, now, todayKey, {
       gateField: "dueSoonReminderSentAt",
-      dueDateWhere: { not: null, gt: now, lte: dueBefore },
-      buildTitle: (title) => `Due soon: ${title}`,
+      matchesDay: (dueKey, today) => dueKey === today,
+      buildTitle: (title) => `Due today: ${title}`,
       buildBody: (dueLabel) => `Due ${dueLabel}`,
       headerColor: "#F59E0B",
-      headerLabel: "งานใกล้ถึงกำหนดส่ง",
+      headerLabel: "ถึงกำหนดส่งวันนี้",
       emoji: "⏰",
     }),
-    runTaskReminderPass(boardIds, now, {
+    runTaskReminderPass(boardIds, now, todayKey, {
       gateField: "overdueReminderSentAt",
-      dueDateWhere: { not: null, lte: now },
+      matchesDay: (dueKey, today) => dueKey < today,
       buildTitle: (title) => `Missed deadline: ${title}`,
       buildBody: (dueLabel) => `Was due ${dueLabel} — not marked done`,
       headerColor: "#E11D48",
