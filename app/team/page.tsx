@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { TASK_STATUS_CONFIG, TASK_PRIORITY_CONFIG, getTaskStatusConfig, getTaskPriorityConfig, Task } from "@/types";
 import { formatDate } from "@/lib/utils/date";
+import { PRIORITY_ICON } from "@/lib/utils/task";
 
 export default function TeamPage() {
   const {
@@ -400,6 +401,7 @@ export default function TeamPage() {
                   selectedMember.tasks.map((task) => {
                     const statusCfg = getTaskStatusConfig(task.status);
                     const priorityCfg = getTaskPriorityConfig(task.priority);
+                    const PriorityIcon = PRIORITY_ICON[task.priority] || PRIORITY_ICON.none;
 
                     return (
                       <button
@@ -420,7 +422,8 @@ export default function TeamPage() {
                         </div>
 
                         <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/40 text-[10px] text-muted-foreground">
-                          <span className={`font-semibold capitalize ${priorityCfg.color}`}>
+                          <span className={`inline-flex items-center gap-1 font-semibold capitalize ${priorityCfg.iconColor}`}>
+                            <PriorityIcon className="h-3 w-3" />
                             {task.priority}
                           </span>
                           {task.dueDate && (

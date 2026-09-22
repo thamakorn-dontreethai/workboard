@@ -322,13 +322,8 @@ export function MondaySlideOver() {
   const universalStatuses: TaskStatus[] = [
     "todo",
     "in_progress",
-    "in_review",
-    "done",
     "blocked",
-    "on_hold",
-    "new_request",
-    "approved",
-    "planning",
+    "done",
   ];
 
   const universalPriorities: TaskPriority[] = [

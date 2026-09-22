@@ -67,24 +67,14 @@ export function StatusDropdown({
                 onStatusChange(st);
                 setIsOpen(false);
               }}
-              className={`w-full py-2 px-3 rounded-lg text-xs font-semibold mb-1 text-center transition-all flex items-center justify-between ${
-                isSelected ? "ring-2 ring-white" : ""
-              } ${cfg.bgColor} ${cfg.color}`}
+              className={`w-full py-2 px-3 rounded-lg text-xs font-semibold mb-1 text-center transition-all flex items-center justify-between ${isSelected ? "ring-2 ring-white" : ""
+                } ${cfg.bgColor} ${cfg.color}`}
             >
               <span>{isBlank ? "" : cfg.label}</span>
               {isSelected && <Check className="h-3.5 w-3.5" />}
             </button>
           );
         })}
-        <div className="mt-2 pt-2 border-t border-zinc-700/50">
-          <button
-            type="button"
-            disabled
-            className="w-full py-1.5 px-3 text-xs text-zinc-400 hover:text-zinc-300 transition-colors text-left flex items-center gap-2"
-          >
-            ✏️ Edit Labels
-          </button>
-        </div>
       </FloatingPanel>
     </div>
   );

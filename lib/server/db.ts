@@ -2,6 +2,8 @@ import fs from "fs";
 import path from "path";
 import { prisma } from "./prisma";
 import { sendAppointmentReminderEmail } from "./email";
+import { hashPassword, verifyPassword } from "./auth";
+import { generateLineLinkCode, LINE_LINK_CODE_TTL_MS, sendLinePushMessage } from "./line";
 import type { CommentAttachment } from "@/types";
 import {
   Workspace,
@@ -1316,7 +1318,10 @@ export async function updateTask(
           }),
           ...(updates.status && { status: updates.status }),
           ...(updates.priority && { priority: updates.priority }),
-          ...(updates.dueDate !== undefined && { dueDate: updates.dueDate }),
+          ...(updates.dueDate !== undefined && {
+            dueDate: updates.dueDate,
+            dueSoonReminderSentAt: null,
+          } as any),
           ...(updates.category && { category: updates.category }),
           ...(updates.groupId && { groupId: updates.groupId }),
           ...(updates.order !== undefined && { order: updates.order }),
@@ -1459,6 +1464,19 @@ export async function assignTask(
                   boardId: updated.boardId,
                 },
               }).catch(() => {})
+            )
+        );
+
+        // Same event, LINE channel — only for people who linked their
+        // account (see lib/server/line.ts); silently skipped otherwise.
+        await Promise.all(
+          addedUsers
+            .filter((u) => u.id !== effectiveActorId && (u as any).lineUserId)
+            .map((u) =>
+              sendLinePushMessage(
+                (u as any).lineUserId,
+                `📋 คุณได้รับมอบหมายงานใหม่\n"${updated.title}"`
+              ).catch(() => {})
             )
         );
       }
@@ -2510,6 +2528,177 @@ export async function updateNotificationPreferences(
   }
 }
 
+function initialsFromName(name: string): string {
+  return (
+    name
+      .trim()
+      .split(/\s+/)
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2) || "U"
+  );
+}
+
+export async function updateUserProfile(
+  userId: string,
+  updates: { name?: string; avatarColor?: string }
+): Promise<User | null> {
+  const name = updates.name?.trim();
+  const avatarColor = updates.avatarColor?.trim();
+
+  if (isPrismaEnabled) {
+    try {
+      const u = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          ...(name && { name, avatarInitials: initialsFromName(name) }),
+          ...(avatarColor && { avatarColor }),
+        },
+      });
+      return {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        avatarInitials: u.avatarInitials,
+        avatarColor: u.avatarColor,
+        role: u.role,
+        isActive: u.isActive,
+        notifyPostLikes: u.notifyPostLikes,
+        notifyPostComments: u.notifyPostComments,
+        notifyNewPosts: u.notifyNewPosts,
+      };
+    } catch (e) {
+      console.warn("Prisma updateUserProfile failed:", e);
+      return null;
+    }
+  }
+
+  const db = readDb();
+  const idx = db.users.findIndex((u) => u.id === userId);
+  if (idx === -1) return null;
+  db.users[idx] = {
+    ...db.users[idx],
+    ...(name && { name, avatarInitials: initialsFromName(name) }),
+    ...(avatarColor && { avatarColor }),
+  };
+  writeDb(db);
+  const { password: _pw, ...safeUser } = db.users[idx];
+  return safeUser as User;
+}
+
+export async function changeUserPassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  if (isPrismaEnabled) {
+    try {
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      if (!u) return { success: false, error: "User not found" };
+      if (!u.password || !verifyPassword(currentPassword, u.password)) {
+        return { success: false, error: "Current password is incorrect" };
+      }
+      await prisma.user.update({
+        where: { id: userId },
+        data: { password: hashPassword(newPassword) },
+      });
+      return { success: true };
+    } catch (e) {
+      console.warn("Prisma changeUserPassword failed:", e);
+      return { success: false, error: "Failed to update password" };
+    }
+  }
+
+  const db = readDb();
+  const idx = db.users.findIndex((u) => u.id === userId);
+  if (idx === -1) return { success: false, error: "User not found" };
+  const stored = db.users[idx].password;
+  if (!stored || !verifyPassword(currentPassword, stored)) {
+    return { success: false, error: "Current password is incorrect" };
+  }
+  db.users[idx].password = hashPassword(newPassword);
+  writeDb(db);
+  return { success: true };
+}
+
+// ─── LINE Messaging API linkage ──────────────────────────────────────────────
+// DB-only (no local-JSON fallback) — like Posts/Files, this is a new feature
+// and the fallback store is unreliable on serverless anyway. Requires
+// LINE_CHANNEL_ACCESS_TOKEN / LINE_CHANNEL_SECRET to actually send anything;
+// see lib/server/line.ts.
+
+export async function createLineLinkCode(userId: string): Promise<string | null> {
+  if (!isPrismaEnabled) return null;
+  const code = generateLineLinkCode();
+  try {
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        lineLinkCode: code,
+        lineLinkCodeExpiresAt: new Date(Date.now() + LINE_LINK_CODE_TTL_MS),
+      } as any,
+    });
+    return code;
+  } catch (e) {
+    console.warn("Prisma createLineLinkCode failed:", e);
+    return null;
+  }
+}
+
+export async function getLineLinkStatus(userId: string): Promise<{ linked: boolean }> {
+  if (!isPrismaEnabled) return { linked: false };
+  try {
+    const u = await prisma.user.findUnique({ where: { id: userId } });
+    return { linked: Boolean((u as any)?.lineUserId) };
+  } catch (e) {
+    console.warn("Prisma getLineLinkStatus failed:", e);
+    return { linked: false };
+  }
+}
+
+export async function unlinkLineAccount(userId: string): Promise<boolean> {
+  if (!isPrismaEnabled) return false;
+  try {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { lineUserId: null, lineLinkCode: null, lineLinkCodeExpiresAt: null } as any,
+    });
+    return true;
+  } catch (e) {
+    console.warn("Prisma unlinkLineAccount failed:", e);
+    return false;
+  }
+}
+
+// Called from the LINE webhook when someone messages the bot a 6-digit
+// code — matches it to whoever generated it in Settings (within its TTL)
+// and links that account. Returns the matched user's name for the bot's
+// confirmation reply, or null if the code is wrong/expired.
+export async function linkLineAccountByCode(
+  code: string,
+  lineUserId: string
+): Promise<{ name: string } | null> {
+  if (!isPrismaEnabled) return null;
+  try {
+    const user = await prisma.user.findFirst({
+      where: {
+        lineLinkCode: code,
+        lineLinkCodeExpiresAt: { gt: new Date() },
+      } as any,
+    });
+    if (!user) return null;
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lineUserId, lineLinkCode: null, lineLinkCodeExpiresAt: null } as any,
+    });
+    return { name: user.name };
+  } catch (e) {
+    console.warn("Prisma linkLineAccountByCode failed:", e);
+    return null;
+  }
+}
+
 // ─── Workspace Files (document library) ─────────────────────────────────────
 // DB-only, same reasoning as Posts — a new feature, no local-JSON fallback
 // (and that fallback is unreliable on serverless anyway).
@@ -2826,6 +3015,110 @@ export async function checkAndSendAppointmentReminders(
   }
 
   return { remindedAppointments, notifications: createdNotifications };
+}
+
+// Tasks due within this window (including already-overdue ones) get a
+// one-time "due soon" nudge — in-app + LINE for whoever has it linked.
+// dueSoonReminderSentAt gates it so the same task doesn't re-notify on
+// every poll; changing the due date clears that gate (see updateTask).
+const DUE_SOON_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export async function checkAndSendTaskDueSoonReminders(
+  workspaceId: string
+): Promise<{ remindedTaskIds: string[]; notifications: Notification[] }> {
+  if (!isPrismaEnabled) return { remindedTaskIds: [], notifications: [] };
+
+  const boards = await prisma.board.findMany({
+    where: { workspaceId, isArchived: false },
+    select: { id: true },
+  });
+  const boardIds = boards.map((b) => b.id);
+  if (boardIds.length === 0) return { remindedTaskIds: [], notifications: [] };
+
+  const now = new Date();
+  const dueBefore = new Date(now.getTime() + DUE_SOON_WINDOW_MS);
+
+  const candidates = await prisma.task.findMany({
+    where: {
+      boardId: { in: boardIds },
+      isArchived: false,
+      status: { notIn: ["done", "cancelled"] },
+      dueDate: { not: null, lte: dueBefore },
+      ...( { dueSoonReminderSentAt: null } as any),
+    },
+  });
+  if (candidates.length === 0) return { remindedTaskIds: [], notifications: [] };
+
+  const assigneeIds = Array.from(new Set(candidates.flatMap((t) => t.assigneeIds)));
+  const users = await prisma.user.findMany({ where: { id: { in: assigneeIds } } });
+  const usersById = new Map(users.map((u) => [u.id, u]));
+
+  const remindedTaskIds: string[] = [];
+  const createdNotifications: Notification[] = [];
+
+  for (const task of candidates) {
+    // Atomically claim it so a second client polling at the same moment
+    // doesn't send duplicate reminders for the same task.
+    const claim = await prisma.task.updateMany({
+      where: { id: task.id, ...( { dueSoonReminderSentAt: null } as any) },
+      data: { dueSoonReminderSentAt: now } as any,
+    });
+    if (claim.count === 0) continue;
+
+    const dueLabel = task.dueDate!.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const overdue = task.dueDate!.getTime() < now.getTime();
+
+    for (const assigneeId of task.assigneeIds) {
+      const user = usersById.get(assigneeId);
+      if (!user) continue;
+
+      try {
+        const notif = await prisma.notification.create({
+          data: {
+            id: `notif-due-${task.id}-${assigneeId}`,
+            userId: assigneeId,
+            type: "due_date",
+            title: overdue ? `Overdue: ${task.title}` : `Due soon: ${task.title}`,
+            body: overdue ? `Was due ${dueLabel}` : `Due ${dueLabel}`,
+            taskId: task.id,
+            boardId: task.boardId,
+          },
+        });
+        createdNotifications.push({
+          id: notif.id,
+          userId: notif.userId,
+          type: notif.type as any,
+          title: notif.title,
+          body: notif.body,
+          taskId: notif.taskId,
+          boardId: notif.boardId,
+          isRead: notif.isRead,
+          createdAt: notif.createdAt,
+        });
+      } catch (e) {
+        console.warn("Failed to create due-date notification:", e);
+      }
+
+      const lineUserId = (user as any).lineUserId;
+      if (lineUserId) {
+        sendLinePushMessage(
+          lineUserId,
+          overdue
+            ? `⚠️ งานเลยกำหนดแล้ว\n"${task.title}"\nกำหนดส่ง: ${dueLabel}`
+            : `⏰ งานใกล้ถึงกำหนด\n"${task.title}"\nกำหนดส่ง: ${dueLabel}`
+        ).catch(() => {});
+      }
+    }
+
+    remindedTaskIds.push(task.id);
+  }
+
+  return { remindedTaskIds, notifications: createdNotifications };
 }
 
 // ─── Dashboards (saved analytics report views over a workspace) ───────────

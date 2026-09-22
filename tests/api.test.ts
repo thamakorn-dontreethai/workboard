@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 import { resetDb, readDb, writeDb, createBoard, createGroup } from "../lib/server/db";
 import { SESSION_COOKIE, createSessionToken } from "../lib/server/session";
 import { GET as getBoardsRoute, POST as postBoardsRoute } from "../app/api/boards/route";
@@ -14,6 +15,8 @@ import { PATCH as patchCommentRoute, DELETE as deleteCommentRoute } from "../app
 import { POST as postSubtaskRoute, PATCH as patchSubtaskRoute } from "../app/api/tasks/[id]/subtasks/route";
 import { GET as getUsersRoute, POST as postUserRoute } from "../app/api/users/route";
 import { GET as getSessionRoute } from "../app/api/auth/session/route";
+import { POST as postWorkspaceRoute } from "../app/api/workspaces/route";
+import { PATCH as patchWorkspaceRoute, DELETE as deleteWorkspaceRoute } from "../app/api/workspaces/[id]/route";
 
 // Mock workspace "ws-1": Somchai is its owner (a leader); the other two are
 // ordinary members.
@@ -399,5 +402,77 @@ describe("Role-based permissions", () => {
     expect((await patch(MEMBER, { name: "Renamed" })).status).toBe(403);
     expect((await patch(MEMBER, { isCollapsed: true, name: "Renamed" })).status).toBe(403);
     expect((await patch(LEADER, { name: "Renamed" })).status).toBe(200);
+  });
+});
+
+describe("Workspace permissions", () => {
+  const WS = "ws-1";
+  const wsCall = (method: string, as: string | null, body?: unknown) =>
+    new NextRequest(`http://localhost:3000/api/workspaces/${WS}`, {
+      method,
+      headers: as ? { Cookie: cookieFor(as) } : {},
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  const ctx = { params: Promise.resolve({ id: WS }) };
+
+  beforeEach(() => {
+    resetDb();
+  });
+
+  it("lets only owners/admins change workspace settings", async () => {
+    expect((await patchWorkspaceRoute(wsCall("PATCH", null, { name: "X" }), ctx)).status).toBe(401);
+    expect((await patchWorkspaceRoute(wsCall("PATCH", MEMBER, { name: "X" }), ctx)).status).toBe(403);
+    expect((await patchWorkspaceRoute(wsCall("PATCH", MEMBER, { coverColor: "red" }), ctx)).status).toBe(403);
+    // A member can't grant themselves ownership by editing the member list either.
+    const members = readDb().workspaces!.find((w) => w.id === WS)!.members.map((m) =>
+      m.userId === MEMBER ? { ...m, role: "owner" as const } : m
+    );
+    expect((await patchWorkspaceRoute(wsCall("PATCH", MEMBER, { members }), ctx)).status).toBe(403);
+    // A person outside the workspace has no access at all.
+    expect((await patchWorkspaceRoute(wsCall("PATCH", "user-nobody", { name: "X" }), ctx)).status).toBe(403);
+
+    expect((await patchWorkspaceRoute(wsCall("PATCH", LEADER, { name: "Renamed" }), ctx)).status).toBe(200);
+  });
+
+  it("lets any member record last-viewed and pin, nothing more", async () => {
+    expect((await patchWorkspaceRoute(wsCall("PATCH", MEMBER, { lastViewedAt: new Date() }), ctx)).status).toBe(200);
+    expect((await patchWorkspaceRoute(wsCall("PATCH", MEMBER, { action: "togglePin" }), ctx)).status).toBe(200);
+    // Slipping a real change in next to an allowed field is still refused.
+    expect(
+      (await patchWorkspaceRoute(wsCall("PATCH", MEMBER, { lastViewedAt: new Date(), name: "X" }), ctx)).status
+    ).toBe(403);
+  });
+
+  it("lets only the owner delete a workspace", async () => {
+    expect((await deleteWorkspaceRoute(wsCall("DELETE", null), ctx)).status).toBe(401);
+    expect((await deleteWorkspaceRoute(wsCall("DELETE", MEMBER), ctx)).status).toBe(403);
+
+    // Even an admin can't — deleting is owner-only.
+    const db = readDb();
+    db.workspaces!.find((w) => w.id === WS)!.members.find((m) => m.userId === OTHER_MEMBER)!.role = "admin";
+    writeDb(db);
+    expect((await deleteWorkspaceRoute(wsCall("DELETE", OTHER_MEMBER), ctx)).status).toBe(403);
+    expect((await patchWorkspaceRoute(wsCall("PATCH", OTHER_MEMBER, { name: "By admin" }), ctx)).status).toBe(200);
+
+    expect((await deleteWorkspaceRoute(wsCall("DELETE", LEADER), ctx)).status).toBe(200);
+  });
+
+  it("creates a workspace owned by the signed-in user, not by a body field", async () => {
+    const anon = await postWorkspaceRoute(
+      new Request("http://localhost:3000/api/workspaces", { method: "POST", body: JSON.stringify({ name: "New" }) })
+    );
+    expect(anon.status).toBe(401);
+
+    const res = await postWorkspaceRoute(
+      new Request("http://localhost:3000/api/workspaces", {
+        method: "POST",
+        headers: { Cookie: cookieFor(MEMBER) },
+        body: JSON.stringify({ name: "Mine", creatorId: LEADER }),
+      })
+    );
+    expect(res.status).toBe(200);
+    const created = (await res.json()).data;
+    const owner = created.members.find((m: any) => m.role === "owner");
+    expect(owner.userId).toBe(MEMBER);
   });
 });

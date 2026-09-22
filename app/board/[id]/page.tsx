@@ -223,9 +223,9 @@ export default function BoardPage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#1e1e21] text-zinc-100 overflow-hidden font-sans">
+    <div className="flex flex-col h-full bg-background text-foreground overflow-hidden font-sans">
       {/* Top Header Bar */}
-      <div className="px-6 pt-4 pb-2 border-b border-[#2a2a2e] bg-[#1c1c1f] shrink-0 space-y-3">
+      <div className="px-6 pt-4 pb-2 border-b border-border bg-card shrink-0 space-y-3">
         {/* Title + Top Right Actions */}
         <div className="flex items-center justify-between gap-4">
           {/* Board Title (Editable) */}
@@ -242,52 +242,22 @@ export default function BoardPage() {
                   e.currentTarget.blur();
                 }
               }}
-              className="text-2xl font-bold text-white bg-transparent border-b border-transparent hover:border-zinc-700 focus:border-indigo-500 focus:outline-none py-0.5 tracking-tight transition-colors"
+              className="text-2xl font-bold text-foreground bg-transparent border-b border-transparent hover:border-border focus:border-indigo-500 focus:outline-none py-0.5 tracking-tight transition-colors"
             />
-            <ChevronDown className="h-4 w-4 text-zinc-400 cursor-pointer hover:text-white" />
+            <ChevronDown className="h-4 w-4 text-muted-foreground cursor-pointer hover:text-accent-foreground" />
           </div>
 
           {/* Right Action Bar */}
           <div className="flex items-center gap-2 text-xs">
-            {/* Integrate */}
-            <button
-              type="button"
-              title="Integrate"
-              className="flex items-center gap-1.5 rounded-lg text-zinc-300 hover:text-white transition-colors"
-            >
-              <Zap className="h-4 w-4" />
-              <span>Integrate</span>
-            </button>
-
-            {/* Automate */}
-            <button
-              type="button"
-              title="Automate"
-              className="flex items-center gap-1.5 rounded-lg text-zinc-300 hover:text-white transition-colors"
-            >
-              <Cpu className="h-4 w-4" />
-              <span>Automate</span>
-            </button>
-
-            {/* Agents */}
-            <button
-              type="button"
-              title="Agents"
-              className="flex items-center gap-1.5 rounded-lg text-zinc-300 hover:text-white transition-colors"
-            >
-              <Lightbulb className="h-4 w-4" />
-              <span>Agents</span>
-            </button>
 
             {/* Invite Button */}
             <button
               type="button"
               onClick={() => openInviteBoardModal(board.id)}
-              className={`flex items-center gap-1.5 rounded-lg border border-zinc-700/80 bg-[#1f212c] px-2.5 py-1 text-zinc-200 hover:text-white hover:bg-zinc-800 transition-colors ${
-                canManage ? "" : "hidden"
-              }`}
+              className={`flex items-center gap-1.5 rounded-lg border border-border/80 bg-muted px-2.5 py-1 text-foreground hover:text-accent-foreground hover:bg-accent transition-colors ${canManage ? "" : "hidden"
+                }`}
             >
-              <UserPlus className="h-3.5 w-3.5 text-zinc-400" />
+              <UserPlus className="h-3.5 w-3.5 text-muted-foreground" />
               <span>
                 Invite / {boardMembers.length}
               </span>
@@ -297,30 +267,21 @@ export default function BoardPage() {
             <button
               type="button"
               title="Sync"
-              className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+              className="p-1 rounded-lg text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors"
             >
               <RefreshCw className="h-4 w-4" />
-            </button>
-
-            {/* More */}
-            <button
-              type="button"
-              title="More options"
-              className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-            >
-              <MoreHorizontal className="h-4 w-4" />
             </button>
           </div>
         </div>
 
         {/* View Tabs: Main table ... + */}
-        <div className="flex items-center gap-2 pt-1 border-t border-[#262836]/60 text-xs">
+        <div className="flex items-center gap-2 pt-1 border-t border-border/60 text-xs">
           <button
             type="button"
             onClick={() => setActiveTab("main-table")}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-t-lg font-semibold transition-colors border-b-2 ${activeTab === "main-table"
-                ? "border-indigo-500 text-white bg-zinc-800/40"
-                : "border-transparent text-zinc-400 hover:text-zinc-200"
+              ? "border-indigo-500 text-foreground bg-accent/40"
+              : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
           >
             <span>Main table</span>
@@ -330,7 +291,7 @@ export default function BoardPage() {
       </div>
 
       {/* Action Toolbar Bar: New Item Button + Search/Filter/Sort Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-2.5 bg-[#1e1e21] border-b border-[#2a2a2e]">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-2.5 bg-background border-b border-border">
         {/* Left: Gray "New item ▾" Button — clicking the label adds an
             item immediately; the chevron is a separate click target that
             opens the "New group of items" menu. */}
@@ -352,9 +313,8 @@ export default function BoardPage() {
               className="flex items-center pl-1.5 pr-3 py-1.5 border-l border-white/20 hover:bg-white/10 active:scale-[0.96] transition-all duration-150"
             >
               <ChevronDown
-                className={`h-3.5 w-3.5 transition-transform duration-200 ${
-                  isNewItemMenuOpen ? "rotate-180" : ""
-                }`}
+                className={`h-3.5 w-3.5 transition-transform duration-200 ${isNewItemMenuOpen ? "rotate-180" : ""
+                  }`}
               />
             </button>
           </div>
@@ -364,7 +324,7 @@ export default function BoardPage() {
             onClose={() => setIsNewItemMenuOpen(false)}
             anchorRef={newItemButtonRef}
             align="left"
-            className="w-56 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl"
+            className="w-56 rounded-xl border border-border bg-popover p-1.5 shadow-2xl"
           >
             <button
               type="button"
@@ -372,9 +332,9 @@ export default function BoardPage() {
                 setIsNewItemMenuOpen(false);
                 openCreateTaskModal(board.id, boardGroups[0]?.id);
               }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
             >
-              <Plus className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+              <Plus className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span>New item (with details)</span>
             </button>
             <button
@@ -385,16 +345,16 @@ export default function BoardPage() {
                   console.error("Failed to create group:", err)
                 );
               }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
             >
-              <Rows2 className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+              <Rows2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span>New group of items</span>
             </button>
           </FloatingPanel>
         </div>
 
         {/* Right Toolbar: Search | Person | Filter | Sort | Hide | Group by */}
-        <div className="flex items-center gap-1.5 text-xs text-zinc-300">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {/* Search */}
           <div className="flex items-center">
             {isSearchOpen ? (
@@ -404,13 +364,13 @@ export default function BoardPage() {
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
                 placeholder="Search this board..."
-                className="w-36 sm:w-48 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+                className="w-36 sm:w-48 rounded-lg border border-border bg-muted px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-indigo-500"
               />
             ) : (
               <button
                 type="button"
                 onClick={() => setIsSearchOpen(true)}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-zinc-800 text-zinc-300 hover:text-white transition-colors"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-accent text-muted-foreground hover:text-accent-foreground transition-colors"
               >
                 <Search className="h-3.5 w-3.5" />
                 <span>Search</span>
@@ -423,11 +383,10 @@ export default function BoardPage() {
             ref={personButtonRef}
             type="button"
             onClick={() => setIsPersonMenuOpen((v) => !v)}
-            className={`hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors ${
-              personFilter.length > 0
-                ? "bg-[#0073ea]/15 text-[#5b9fff] hover:bg-[#0073ea]/25"
-                : "hover:bg-zinc-800 text-zinc-300 hover:text-white"
-            }`}
+            className={`hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors ${personFilter.length > 0
+              ? "bg-[#0073ea]/15 text-[#5b9fff] hover:bg-[#0073ea]/25"
+              : "hover:bg-accent text-muted-foreground hover:text-accent-foreground"
+              }`}
           >
             <User className="h-3.5 w-3.5" />
             <span>Person</span>
@@ -442,15 +401,15 @@ export default function BoardPage() {
             onClose={() => setIsPersonMenuOpen(false)}
             anchorRef={personButtonRef}
             align="left"
-            className="w-56 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl"
+            className="w-56 rounded-xl border border-border bg-popover p-1.5 shadow-2xl"
           >
             <div className="max-h-64 overflow-y-auto space-y-0.5">
               <button
                 type="button"
                 onClick={() => togglePersonFilter(UNASSIGNED_FILTER_ID)}
-                className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
               >
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-700 text-zinc-300 text-[10px] font-bold shrink-0">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-muted-foreground text-[10px] font-bold shrink-0">
                   ?
                 </span>
                 <span className="flex-1 truncate">Unassigned</span>
@@ -463,7 +422,7 @@ export default function BoardPage() {
                   key={u.id}
                   type="button"
                   onClick={() => togglePersonFilter(u.id)}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
                 >
                   <span
                     className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white shrink-0 ${u.avatarColor || "bg-indigo-600"}`}
@@ -479,11 +438,11 @@ export default function BoardPage() {
             </div>
             {personFilter.length > 0 && (
               <>
-                <div className="my-1 border-t border-zinc-700/60" />
+                <div className="my-1 border-t border-border/60" />
                 <button
                   type="button"
                   onClick={() => setPersonFilter([])}
-                  className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+                  className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
                 >
                   <X className="h-3 w-3" />
                   <span>Clear</span>
@@ -497,11 +456,10 @@ export default function BoardPage() {
             ref={filterButtonRef}
             type="button"
             onClick={() => setIsFilterMenuOpen((v) => !v)}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors ${
-              statusFilterSel.length > 0 || priorityFilterSel.length > 0
-                ? "bg-[#0073ea]/15 text-[#5b9fff] hover:bg-[#0073ea]/25"
-                : "hover:bg-zinc-800 text-zinc-300 hover:text-white"
-            }`}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors ${statusFilterSel.length > 0 || priorityFilterSel.length > 0
+              ? "bg-[#0073ea]/15 text-[#5b9fff] hover:bg-[#0073ea]/25"
+              : "hover:bg-accent text-muted-foreground hover:text-accent-foreground"
+              }`}
           >
             <Filter className="h-3.5 w-3.5" />
             <span>Filter</span>
@@ -510,17 +468,17 @@ export default function BoardPage() {
                 {statusFilterSel.length + priorityFilterSel.length}
               </span>
             )}
-            <ChevronDown className="h-3 w-3 text-zinc-500" />
+            <ChevronDown className="h-3 w-3 text-muted-foreground" />
           </button>
           <FloatingPanel
             isOpen={isFilterMenuOpen}
             onClose={() => setIsFilterMenuOpen(false)}
             anchorRef={filterButtonRef}
             align="left"
-            className="w-64 rounded-xl border border-zinc-700 bg-[#1c1e28] p-2.5 shadow-2xl space-y-3"
+            className="w-64 rounded-xl border border-border bg-popover p-2.5 shadow-2xl space-y-3"
           >
             <div>
-              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 px-0.5">
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5 px-0.5">
                 Status
               </p>
               <div className="flex flex-wrap gap-1.5">
@@ -532,11 +490,10 @@ export default function BoardPage() {
                       key={s}
                       type="button"
                       onClick={() => toggleStatusFilter(s)}
-                      className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border transition-colors ${
-                        isChecked
-                          ? "border-[#0073ea] bg-[#0073ea]/15 text-white"
-                          : "border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-600"
-                      }`}
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border transition-colors ${isChecked
+                        ? "border-[#0073ea] bg-[#0073ea]/15 text-[#0073ea]"
+                        : "border-border text-muted-foreground hover:text-accent-foreground hover:border-border"
+                        }`}
                     >
                       <span
                         className="h-1.5 w-1.5 rounded-full shrink-0"
@@ -549,7 +506,7 @@ export default function BoardPage() {
               </div>
             </div>
             <div>
-              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 px-0.5">
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5 px-0.5">
                 Priority
               </p>
               <div className="flex flex-wrap gap-1.5">
@@ -561,11 +518,10 @@ export default function BoardPage() {
                       key={p}
                       type="button"
                       onClick={() => togglePriorityFilter(p)}
-                      className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border transition-colors ${
-                        isChecked
-                          ? "border-[#0073ea] bg-[#0073ea]/15 text-white"
-                          : "border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-600"
-                      }`}
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border transition-colors ${isChecked
+                        ? "border-[#0073ea] bg-[#0073ea]/15 text-[#0073ea]"
+                        : "border-border text-muted-foreground hover:text-accent-foreground hover:border-border"
+                        }`}
                     >
                       {cfg.label}
                     </button>
@@ -580,7 +536,7 @@ export default function BoardPage() {
                   setStatusFilterSel([]);
                   setPriorityFilterSel([]);
                 }}
-                className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors border-t border-zinc-700/60 pt-2"
+                className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors border-t border-border/60 pt-2"
               >
                 <X className="h-3 w-3" />
                 <span>Clear filters</span>
@@ -593,11 +549,10 @@ export default function BoardPage() {
             ref={sortButtonRef}
             type="button"
             onClick={() => setIsSortMenuOpen((v) => !v)}
-            className={`hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors ${
-              sortBy !== "manual"
-                ? "bg-[#0073ea]/15 text-[#5b9fff] hover:bg-[#0073ea]/25"
-                : "hover:bg-zinc-800 text-zinc-300 hover:text-white"
-            }`}
+            className={`hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors ${sortBy !== "manual"
+              ? "bg-[#0073ea]/15 text-[#5b9fff] hover:bg-[#0073ea]/25"
+              : "hover:bg-accent text-muted-foreground hover:text-accent-foreground"
+              }`}
           >
             <ArrowUpDown className="h-3.5 w-3.5" />
             <span>Sort</span>
@@ -607,7 +562,7 @@ export default function BoardPage() {
             onClose={() => setIsSortMenuOpen(false)}
             anchorRef={sortButtonRef}
             align="left"
-            className="w-52 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl"
+            className="w-52 rounded-xl border border-border bg-popover p-1.5 shadow-2xl"
           >
             {(
               [
@@ -625,11 +580,10 @@ export default function BoardPage() {
                   setSortBy(opt.id);
                   setIsSortMenuOpen(false);
                 }}
-                className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
-                  sortBy === opt.id
-                    ? "bg-[#0073ea]/15 text-[#5b9fff]"
-                    : "text-zinc-200 hover:bg-zinc-800 hover:text-white"
-                }`}
+                className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${sortBy === opt.id
+                  ? "bg-[#0073ea]/15 text-[#5b9fff]"
+                  : "text-foreground hover:bg-accent hover:text-accent-foreground"
+                  }`}
               >
                 <span>{opt.label}</span>
                 {sortBy === opt.id && <Check className="h-3.5 w-3.5 shrink-0" />}
@@ -637,13 +591,13 @@ export default function BoardPage() {
             ))}
             {sortBy !== "manual" && (
               <>
-                <div className="my-1 border-t border-zinc-700/60" />
+                <div className="my-1 border-t border-border/60" />
                 <button
                   type="button"
                   onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
                 >
-                  <ArrowUpDown className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+                  <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                   <span>{sortDir === "asc" ? "Ascending" : "Descending"}</span>
                 </button>
               </>
@@ -655,11 +609,10 @@ export default function BoardPage() {
             ref={hideButtonRef}
             type="button"
             onClick={() => setIsHideMenuOpen((v) => !v)}
-            className={`hidden md:flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors ${
-              hiddenColumns.size > 0
-                ? "bg-[#0073ea]/15 text-[#5b9fff] hover:bg-[#0073ea]/25"
-                : "hover:bg-zinc-800 text-zinc-300 hover:text-white"
-            }`}
+            className={`hidden md:flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors ${hiddenColumns.size > 0
+              ? "bg-[#0073ea]/15 text-[#5b9fff] hover:bg-[#0073ea]/25"
+              : "hover:bg-accent text-muted-foreground hover:text-accent-foreground"
+              }`}
           >
             <EyeOff className="h-3.5 w-3.5" />
             <span>Hide</span>
@@ -669,7 +622,7 @@ export default function BoardPage() {
             onClose={() => setIsHideMenuOpen(false)}
             anchorRef={hideButtonRef}
             align="left"
-            className="w-48 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl"
+            className="w-48 rounded-xl border border-border bg-popover p-1.5 shadow-2xl"
           >
             {(
               [
@@ -684,15 +637,14 @@ export default function BoardPage() {
                   key={col.id}
                   type="button"
                   onClick={() => toggleHiddenColumn(col.id)}
-                  className="w-full flex items-center justify-between gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                  className="w-full flex items-center justify-between gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
                 >
                   <span>{col.label}</span>
                   <span
-                    className={`h-4 w-4 rounded border flex items-center justify-center transition-colors ${
-                      !isHidden
-                        ? "bg-[#0073ea] border-[#0073ea]"
-                        : "border-zinc-600 bg-transparent"
-                    }`}
+                    className={`h-4 w-4 rounded border flex items-center justify-center transition-colors ${!isHidden
+                      ? "bg-[#0073ea] border-[#0073ea]"
+                      : "border-border bg-transparent"
+                      }`}
                   >
                     {!isHidden && <Check className="h-3 w-3 text-white" />}
                   </span>
@@ -706,7 +658,7 @@ export default function BoardPage() {
             ref={groupByButtonRef}
             type="button"
             onClick={() => setIsGroupByMenuOpen((v) => !v)}
-            className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-zinc-800 text-zinc-300 hover:text-white transition-colors"
+            className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-accent text-muted-foreground hover:text-accent-foreground transition-colors"
           >
             <Layers className="h-3.5 w-3.5" />
             <span>Group by</span>
@@ -716,22 +668,22 @@ export default function BoardPage() {
             onClose={() => setIsGroupByMenuOpen(false)}
             anchorRef={groupByButtonRef}
             align="left"
-            className="w-52 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl"
+            className="w-52 rounded-xl border border-border bg-popover p-1.5 shadow-2xl"
           >
             <button
               type="button"
               onClick={handleExpandAllGroups}
-              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
             >
-              <Maximize2 className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+              <Maximize2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span>Expand all groups</span>
             </button>
             <button
               type="button"
               onClick={handleCollapseAllGroups}
-              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
             >
-              <Minimize2 className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+              <Minimize2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span>Collapse all groups</span>
             </button>
           </FloatingPanel>
@@ -741,7 +693,7 @@ export default function BoardPage() {
             ref={moreButtonRef}
             type="button"
             onClick={() => setIsMoreMenuOpen((v) => !v)}
-            className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+            className="p-1 rounded-lg hover:bg-accent text-muted-foreground hover:text-accent-foreground transition-colors"
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
@@ -750,14 +702,14 @@ export default function BoardPage() {
             onClose={() => setIsMoreMenuOpen(false)}
             anchorRef={moreButtonRef}
             align="right"
-            className="w-52 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl"
+            className="w-52 rounded-xl border border-border bg-popover p-1.5 shadow-2xl"
           >
             <button
               type="button"
               onClick={handleExportCsv}
-              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
             >
-              <Download className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+              <Download className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span>Export board to CSV</span>
             </button>
           </FloatingPanel>
@@ -765,7 +717,7 @@ export default function BoardPage() {
       </div>
 
       {/* Main Table Area */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 bg-[#1a1a1d]">
+      <div className="flex-1 overflow-y-auto px-6 py-4 bg-background">
         <MondayTable
           boardId={board.id}
           filters={{
@@ -787,9 +739,8 @@ export default function BoardPage() {
               console.error("Failed to create group:", err)
             )
           }
-          className={`mt-6 flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-300 hover:text-white hover:bg-zinc-800/50 transition-colors cursor-pointer ${
-            canManage ? "" : "hidden"
-          }`}
+          className={`mt-6 flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-accent-foreground hover:bg-accent/50 transition-colors cursor-pointer ${canManage ? "" : "hidden"
+            }`}
         >
           <Plus className="h-4 w-4" />
           <span>Add new group</span>

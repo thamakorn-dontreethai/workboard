@@ -12,6 +12,7 @@ import {
 } from "@/types";
 import { AssigneeSelect } from "@/components/common/AssigneeSelect";
 import { formatDate } from "@/lib/utils/date";
+import { PRIORITY_ICON } from "@/lib/utils/task";
 import {
   X,
   Trash2,
@@ -91,6 +92,7 @@ export function TaskModal() {
 
   const statusConfig = getTaskStatusConfig(task.status);
   const priorityConfig = getTaskPriorityConfig(task.priority);
+  const PriorityIcon = PRIORITY_ICON[task.priority];
 
   const handleTitleBlur = () => {
     if (title.trim() && title !== task.title) {
@@ -276,7 +278,8 @@ export function TaskModal() {
                   }
                   className="flex items-center gap-1.5 rounded-lg border border-border/80 bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent transition-colors w-full justify-between"
                 >
-                  <span className={`font-semibold capitalize ${priorityConfig.color}`}>
+                  <span className={`inline-flex items-center gap-1 font-semibold capitalize ${priorityConfig.iconColor}`}>
+                    <PriorityIcon className="h-3.5 w-3.5" />
                     {priorityConfig.label}
                   </span>
                 </button>

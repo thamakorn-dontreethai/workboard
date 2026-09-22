@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getWorkspaces, createWorkspace } from "@/lib/server/db";
+import { requireSession } from "@/lib/server/permissions";
 
 export async function GET(request: Request) {
   try {
@@ -21,6 +22,9 @@ export async function GET(request: Request) {
 
 export async function POST(req: Request) {
   try {
+    const session = requireSession(req);
+    if (!session.ok) return session.response;
+
     const body = await req.json();
     if (!body.name || !body.name.trim()) {
       return NextResponse.json(
@@ -36,7 +40,8 @@ export async function POST(req: Request) {
       avatarColor: body.avatarColor || "bg-indigo-600",
       icon: body.icon,
       coverColor: body.coverColor,
-      creatorId: body.creatorId,
+      // The creator (who becomes owner) is the signed-in user, not a body field.
+      creatorId: session.userId,
     });
 
     return NextResponse.json({ success: true, data: newWorkspace });

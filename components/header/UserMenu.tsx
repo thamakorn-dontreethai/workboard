@@ -2,13 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import {
-  User as UserIcon,
-  Users,
-  Settings,
-  LogOut,
-  ShieldCheck,
-} from "lucide-react";
+import { Settings, LogOut, ShieldCheck } from "lucide-react";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 
 export function UserMenu() {
@@ -96,31 +90,18 @@ export function UserMenu() {
                 </div>
               </div>
             </div>
-            <div className="mt-2 inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-[10px] font-medium text-foreground">
-              {currentUser.role}
-            </div>
           </div>
 
           {/* Navigation & Auth Links */}
           <div className="py-1 space-y-0.5">
             <Link
-              href="/team"
+              href="/settings"
               onClick={() => setIsOpen(false)}
               role="menuitem"
               className="w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-foreground hover:bg-muted/60 transition-colors"
             >
-              <Users className="h-3.5 w-3.5 text-primary" />
-              <span>Team & Members Management</span>
-            </Link>
-
-            <Link
-              href="/register"
-              onClick={() => setIsOpen(false)}
-              role="menuitem"
-              className="w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-foreground hover:bg-muted/60 transition-colors"
-            >
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-              <span>Register New User</span>
+              <Settings className="h-3.5 w-3.5 text-primary" />
+              <span>Account Settings</span>
             </Link>
 
             <Link

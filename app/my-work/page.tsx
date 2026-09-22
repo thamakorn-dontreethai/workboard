@@ -12,6 +12,7 @@ import {
   TaskStatus,
 } from "@/types";
 import { formatDate, isOverdue } from "@/lib/utils/date";
+import { PRIORITY_ICON } from "@/lib/utils/task";
 import {
   CheckSquare,
   CheckCircle2,
@@ -78,6 +79,7 @@ export default function MyWorkPage() {
   const renderTaskItem = (task: Task) => {
     const statusCfg = getTaskStatusConfig(task.status);
     const priorityCfg = getTaskPriorityConfig(task.priority);
+    const PriorityIcon = PRIORITY_ICON[task.priority];
     const board = boards.find((b) => b.id === task.boardId);
     const overdue = isOverdue(task.dueDate, task.status);
 
@@ -148,8 +150,9 @@ export default function MyWorkPage() {
         {/* Priority */}
         <div className="shrink-0 hidden md:block">
           <span
-            className={`text-[10px] font-bold uppercase ${priorityCfg.color}`}
+            className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase ${priorityCfg.iconColor}`}
           >
+            <PriorityIcon className="h-3 w-3" />
             {task.priority}
           </span>
         </div>

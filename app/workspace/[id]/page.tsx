@@ -84,6 +84,12 @@ export default function WorkspacePage() {
   const currentWs =
     workspaces.find((w) => w.id === workspaceId) || workspace;
 
+  // Workspace settings are for owners/admins (the API enforces this too);
+  // deleting the workspace is owner-only. Members just see the workspace.
+  const myWsRole = currentWs?.members?.find((m) => m.userId === currentUser.id)?.role;
+  const canManageWs = myWsRole === "owner" || myWsRole === "admin";
+  const isWsOwner = myWsRole === "owner";
+
   // Auto-switch context if different
   useEffect(() => {
     if (workspaceId && workspace.id !== workspaceId) {
@@ -735,14 +741,14 @@ export default function WorkspacePage() {
   const currentCoverStyle = isCustomImage ? "" : rawCover;
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#141414] text-zinc-100 min-h-full flex flex-col font-sans select-none">
+    <div className="flex-1 overflow-y-auto bg-background text-foreground min-h-full flex flex-col font-sans select-none">
       {/* ─── 1. TOP COVER BANNER (Clean White Banner, Exact Match to Photo) ───── */}
       <div
         className={`relative w-full h-[238px] transition-colors bg-cover bg-center ${currentCoverStyle}`}
         style={customImageUrl ? { backgroundImage: `url(${customImageUrl})` } : undefined}
       >
         {/* Change Cover Button (Top Right of Cover) */}
-        <div className="absolute top-3.5 right-8 z-20" ref={coverRef}>
+        <div className={`absolute top-3.5 right-8 z-20 ${canManageWs ? "" : "hidden"}`} ref={coverRef}>
           <button
             type="button"
             onClick={() => setIsCoverPickerOpen(!isCoverPickerOpen)}
@@ -764,7 +770,7 @@ export default function WorkspacePage() {
       </div>
 
       {/* ─── 2. MAIN HEADER & AVATAR (In Dark Section) ────────────────────────── */}
-      <div className="bg-[#141414] px-16 pb-0 pt-0">
+      <div className="bg-background px-16 pb-0 pt-0">
         <div className="w-full">
           <div className="flex items-start justify-between gap-6 relative">
             {/* Left: Avatar + Title + Description */}
@@ -773,7 +779,7 @@ export default function WorkspacePage() {
               <div className="relative -mt-9 shrink-0" ref={avatarRef}>
                 <button
                   type="button"
-                  onClick={() => setIsAvatarPickerOpen(!isAvatarPickerOpen)}
+                  onClick={() => canManageWs && setIsAvatarPickerOpen(!isAvatarPickerOpen)}
                   title="Click to customize workspace icon and color"
                   className="group relative rounded-2xl shadow-xl transition-all hover:scale-105 ring-4 ring-white cursor-pointer"
                 >
@@ -820,14 +826,14 @@ export default function WorkspacePage() {
                             setIsEditingName(false);
                           }
                         }}
-                        className="rounded-md bg-zinc-900 border border-[#0073ea] px-2.5 py-0.5 text-[32px] font-semibold text-white focus:outline-none"
+                        className="rounded-md bg-muted border border-[#0073ea] px-2.5 py-0.5 text-[32px] font-semibold text-foreground focus:outline-none"
                       />
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">
                       <h1
-                        onClick={() => setIsEditingName(true)}
-                        className="text-[32px] font-semibold text-white tracking-tight cursor-pointer hover:text-zinc-200 transition-colors leading-tight"
+                        onClick={() => canManageWs && setIsEditingName(true)}
+                        className="text-[32px] font-semibold text-foreground tracking-tight cursor-pointer hover:text-foreground transition-colors leading-tight"
                         title="Click to rename"
                       >
                         {currentWs.name || "Workspace"}
@@ -853,13 +859,13 @@ export default function WorkspacePage() {
                         }
                       }}
                       placeholder="Add workspace description"
-                      className="rounded bg-zinc-900 border border-zinc-700 px-2 py-0.5 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#0073ea] w-72"
+                      className="rounded bg-muted border border-border px-2 py-0.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#0073ea] w-72"
                     />
                   </div>
                 ) : (
                   <p
-                    onClick={() => setIsEditingDescription(true)}
-                    className="text-sm text-zinc-200 hover:text-white cursor-pointer transition-colors"
+                    onClick={() => canManageWs && setIsEditingDescription(true)}
+                    className="text-sm text-foreground hover:text-accent-foreground cursor-pointer transition-colors"
                   >
                     {currentWs.description || "Add workspace description"}
                   </p>
@@ -873,16 +879,16 @@ export default function WorkspacePage() {
 
 
               {/* Current User */}
-              <div className="text-white" title={currentUser.name}>
+              <div className="text-foreground" title={currentUser.name}>
                 <User className="h-5 w-5 fill-white" />
               </div>
 
               {/* Three Dots Menu Button */}
-              <div className="relative" ref={menuRef}>
+              <div className={`relative ${canManageWs ? "" : "hidden"}`} ref={menuRef}>
                 <button
                   type="button"
                   onClick={() => setIsMenuOpen(!isMenuOpen)}
-                  className="text-white p-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
+                  className="text-foreground p-1 rounded hover:bg-accent transition-colors cursor-pointer"
                   title="Workspace options"
                 >
                   <MoreHorizontal className="h-5 w-5" />
@@ -890,8 +896,8 @@ export default function WorkspacePage() {
 
                 {/* Dropdown Menu (Rename, Icon color, Privacy, Delete) */}
                 {isMenuOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-52 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-xs z-50 animate-in fade-in zoom-in-95">
-                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                  <div className="absolute right-0 top-full mt-2 w-52 rounded-xl border border-border bg-popover p-1.5 shadow-2xl text-xs z-50 animate-in fade-in zoom-in-95">
+                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                       Workspace Settings
                     </div>
 
@@ -901,7 +907,7 @@ export default function WorkspacePage() {
                         setIsMenuOpen(false);
                         setIsEditingName(true);
                       }}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left cursor-pointer"
                     >
                       <Edit2 className="h-3.5 w-3.5 text-blue-400" />
                       <span>Rename workspace</span>
@@ -913,7 +919,7 @@ export default function WorkspacePage() {
                         setIsMenuOpen(false);
                         setIsAvatarPickerOpen(true);
                       }}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left cursor-pointer"
                     >
                       <Palette className="h-3.5 w-3.5 text-amber-400" />
                       <span>Change icon color</span>
@@ -922,7 +928,7 @@ export default function WorkspacePage() {
                     <button
                       type="button"
                       onClick={handleTogglePrivacy}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left cursor-pointer"
                     >
                       {currentWs.privacy === "closed" ? (
                         <>
@@ -937,7 +943,7 @@ export default function WorkspacePage() {
                       )}
                     </button>
 
-                    <div className="my-1 border-t border-zinc-800" />
+                    <div className="my-1 border-t border-border" />
 
                     <button
                       type="button"
@@ -945,7 +951,9 @@ export default function WorkspacePage() {
                         setIsMenuOpen(false);
                         setIsDeleteDialogOpen(true);
                       }}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors text-left font-medium cursor-pointer"
+                      className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors text-left font-medium cursor-pointer ${
+                        isWsOwner ? "" : "hidden"
+                      }`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       <span>Delete workspace</span>
@@ -957,12 +965,11 @@ export default function WorkspacePage() {
           </div>
 
           {/* ─── 3. TABS (Posts | Content | Files | Member) ─────────────────── */}
-          <div className="flex items-center border-b border-zinc-600 mt-8">
+          <div className="flex items-center border-b border-border mt-8">
             {(
               [
                 { id: "posts", label: "Posts", icon: MessageSquare },
                 { id: "content", label: "Content", icon: SquarePen },
-                { id: "files", label: "Files", icon: FileIcon },
                 { id: "calendar", label: "Calendar", icon: CalendarIcon },
                 { id: "permissions", label: "Member", icon: Lock },
               ] as const
@@ -972,8 +979,8 @@ export default function WorkspacePage() {
                 type="button"
                 onClick={() => setActiveTab(id)}
                 className={`flex items-center gap-2 px-4 pb-2.5 text-[15px] transition-colors relative cursor-pointer outline-none focus:outline-none ${activeTab === id
-                  ? "text-white"
-                  : "text-zinc-400 hover:text-zinc-200"
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
                   }`}
               >
                 <Icon className="h-4 w-4" />
@@ -994,7 +1001,7 @@ export default function WorkspacePage() {
           {activeTab === "posts" && (
             <div className="pt-6 pb-10 max-w-2xl mx-auto space-y-5">
               {/* Composer */}
-              <div className="rounded-2xl border border-zinc-800 bg-[#1a1b1e] p-4 space-y-3">
+              <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
                 <div className="flex items-start gap-3">
                   <div
                     className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-bold text-xs text-white ${currentUser.avatarColor || "bg-indigo-600"}`}
@@ -1006,7 +1013,7 @@ export default function WorkspacePage() {
                     onChange={(e) => setNewPostContent(e.target.value)}
                     placeholder={`Share an update with ${currentWs.name}...`}
                     rows={2}
-                    className="flex-1 resize-none bg-transparent text-sm text-white placeholder:text-zinc-500 focus:outline-none leading-relaxed pt-1.5"
+                    className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none leading-relaxed pt-1.5"
                   />
                 </div>
 
@@ -1015,19 +1022,19 @@ export default function WorkspacePage() {
                     <img
                       src={newPostImage}
                       alt="Attached"
-                      className="max-h-48 rounded-xl border border-zinc-700"
+                      className="max-h-48 rounded-xl border border-border"
                     />
                     <button
                       type="button"
                       onClick={() => setNewPostImage(null)}
-                      className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white transition-colors"
+                      className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-muted border border-border text-muted-foreground hover:text-accent-foreground transition-colors"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 )}
 
-                <div className="flex items-center justify-between pt-2 border-t border-zinc-800 ml-12">
+                <div className="flex items-center justify-between pt-2 border-t border-border ml-12">
                   <input
                     ref={postImageInputRef}
                     type="file"
@@ -1038,7 +1045,7 @@ export default function WorkspacePage() {
                   <button
                     type="button"
                     onClick={() => postImageInputRef.current?.click()}
-                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors"
                   >
                     <ImagePlus className="h-4 w-4" />
                     <span>Photo</span>
@@ -1056,12 +1063,12 @@ export default function WorkspacePage() {
 
               {/* Feed */}
               {isLoadingPosts ? (
-                <div className="py-16 text-center text-xs text-zinc-500">Loading posts...</div>
+                <div className="py-16 text-center text-xs text-muted-foreground">Loading posts...</div>
               ) : posts.length === 0 ? (
-                <div className="py-16 text-center rounded-2xl border border-dashed border-zinc-800 space-y-2">
-                  <MessageSquare className="h-8 w-8 text-zinc-600 mx-auto" />
-                  <p className="text-sm font-semibold text-zinc-300">No posts yet</p>
-                  <p className="text-xs text-zinc-500">
+                <div className="py-16 text-center rounded-2xl border border-dashed border-border space-y-2">
+                  <MessageSquare className="h-8 w-8 text-muted-foreground mx-auto" />
+                  <p className="text-sm font-semibold text-muted-foreground">No posts yet</p>
+                  <p className="text-xs text-muted-foreground">
                     Be the first to share something with this workspace.
                   </p>
                 </div>
@@ -1072,7 +1079,7 @@ export default function WorkspacePage() {
                   return (
                     <div
                       key={post.id}
-                      className="rounded-2xl border border-zinc-800 bg-[#1a1b1e] overflow-hidden"
+                      className="rounded-2xl border border-border bg-card overflow-hidden"
                     >
                       <div className="p-4 space-y-3">
                         <div className="flex items-center justify-between">
@@ -1083,10 +1090,10 @@ export default function WorkspacePage() {
                               {author?.avatarInitials || "?"}
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-white">
+                              <div className="text-sm font-semibold text-foreground">
                                 {author?.name || "Unknown"}
                               </div>
-                              <div className="text-[11px] text-zinc-500">
+                              <div className="text-[11px] text-muted-foreground">
                                 {formatDate(post.createdAt)}
                               </div>
                             </div>
@@ -1096,14 +1103,14 @@ export default function WorkspacePage() {
                               type="button"
                               onClick={() => handleDeletePost(post.id)}
                               title="Delete post"
-                              className="text-zinc-500 hover:text-rose-400 transition-colors"
+                              className="text-muted-foreground hover:text-rose-400 transition-colors"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           )}
                         </div>
 
-                        <p className="text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap">
+                        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
                           {post.content}
                         </p>
 
@@ -1111,16 +1118,16 @@ export default function WorkspacePage() {
                           <img
                             src={post.imageUrl}
                             alt=""
-                            className="w-full max-h-96 object-cover rounded-xl border border-zinc-800"
+                            className="w-full max-h-96 object-cover rounded-xl border border-border"
                           />
                         )}
                       </div>
 
-                      <div className="flex items-center gap-1 px-4 py-2 border-t border-zinc-800/80">
+                      <div className="flex items-center gap-1 px-4 py-2 border-t border-border/80">
                         <button
                           type="button"
                           onClick={() => handleReaction(post.id, "like")}
-                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${post.myReaction === "like" ? "text-[#57b6ff] bg-[#0073ea]/10" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${post.myReaction === "like" ? "text-[#57b6ff] bg-[#0073ea]/10" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"}`}
                         >
                           <ThumbsUp
                             className={`h-3.5 w-3.5 ${post.myReaction === "like" ? "fill-current" : ""}`}
@@ -1130,7 +1137,7 @@ export default function WorkspacePage() {
                         <button
                           type="button"
                           onClick={() => handleReaction(post.id, "dislike")}
-                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${post.myReaction === "dislike" ? "text-rose-400 bg-rose-500/10" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${post.myReaction === "dislike" ? "text-rose-400 bg-rose-500/10" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"}`}
                         >
                           <ThumbsDown
                             className={`h-3.5 w-3.5 ${post.myReaction === "dislike" ? "fill-current" : ""}`}
@@ -1142,7 +1149,7 @@ export default function WorkspacePage() {
                           onClick={() =>
                             setExpandedCommentsPostId(isExpanded ? null : post.id)
                           }
-                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${isExpanded ? "text-white bg-zinc-800" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${isExpanded ? "text-accent-foreground bg-accent" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"}`}
                         >
                           <MessageSquare className="h-3.5 w-3.5" />
                           <span>{post.comments.length > 0 ? post.comments.length : "Comment"}</span>
@@ -1150,7 +1157,7 @@ export default function WorkspacePage() {
                         <button
                           type="button"
                           onClick={() => handleSharePost(post.id)}
-                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors ml-auto"
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors ml-auto"
                         >
                           <Share2 className="h-3.5 w-3.5" />
                           <span>{copiedPostId === post.id ? "Link copied!" : "Share"}</span>
@@ -1158,7 +1165,7 @@ export default function WorkspacePage() {
                       </div>
 
                       {isExpanded && (
-                        <div className="border-t border-zinc-800/80 bg-[#161719] p-4 space-y-3">
+                        <div className="border-t border-border/80 bg-muted p-4 space-y-3">
                           {post.comments.map((c) => {
                             const commentAuthor = users.find((u) => u.id === c.authorId);
                             return (
@@ -1169,12 +1176,12 @@ export default function WorkspacePage() {
                                   {commentAuthor?.avatarInitials || "?"}
                                 </div>
                                 <div className="min-w-0 flex-1 space-y-1">
-                                  <div className="rounded-2xl bg-zinc-800/70 px-3 py-2">
-                                    <div className="text-xs font-semibold text-white">
+                                  <div className="rounded-2xl bg-accent/70 px-3 py-2">
+                                    <div className="text-xs font-semibold text-foreground">
                                       {commentAuthor?.name || "Unknown"}
                                     </div>
                                     {c.content.trim() && (
-                                      <p className="text-xs text-zinc-200 mt-0.5 whitespace-pre-wrap">
+                                      <p className="text-xs text-foreground mt-0.5 whitespace-pre-wrap">
                                         {c.content}
                                       </p>
                                     )}
@@ -1183,10 +1190,10 @@ export default function WorkspacePage() {
                                     <img
                                       src={c.imageUrl}
                                       alt=""
-                                      className="max-h-40 rounded-xl border border-zinc-800"
+                                      className="max-h-40 rounded-xl border border-border"
                                     />
                                   )}
-                                  <div className="text-[10px] text-zinc-500 pl-3">
+                                  <div className="text-[10px] text-muted-foreground pl-3">
                                     {formatDate(c.createdAt)}
                                   </div>
                                 </div>
@@ -1207,20 +1214,20 @@ export default function WorkspacePage() {
                                   <img
                                     src={commentImageDrafts[post.id]!}
                                     alt="Attached"
-                                    className="max-h-32 rounded-lg border border-zinc-700"
+                                    className="max-h-32 rounded-lg border border-border"
                                   />
                                   <button
                                     type="button"
                                     onClick={() =>
                                       setCommentImageDrafts((prev) => ({ ...prev, [post.id]: null }))
                                     }
-                                    className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white transition-colors"
+                                    className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-muted border border-border text-muted-foreground hover:text-accent-foreground transition-colors"
                                   >
                                     <X className="h-3 w-3" />
                                   </button>
                                 </div>
                               )}
-                              <div className="flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900/60 pl-3 pr-1.5 py-1">
+                              <div className="flex items-center gap-2 rounded-full border border-border bg-muted/60 pl-3 pr-1.5 py-1">
                                 <input
                                   type="text"
                                   value={commentDrafts[post.id] || ""}
@@ -1231,7 +1238,7 @@ export default function WorkspacePage() {
                                     if (e.key === "Enter") handleAddComment(post.id);
                                   }}
                                   placeholder="Write a comment..."
-                                  className="flex-1 bg-transparent text-xs text-white placeholder:text-zinc-500 focus:outline-none"
+                                  className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
                                 />
                                 <input
                                   ref={(el) => {
@@ -1246,7 +1253,7 @@ export default function WorkspacePage() {
                                   type="button"
                                   onClick={() => commentImageInputRefs.current[post.id]?.click()}
                                   title="Attach image"
-                                  className="p-1 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                                  className="p-1 rounded-full text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors"
                                 >
                                   <ImagePlus className="h-3.5 w-3.5" />
                                 </button>
@@ -1279,13 +1286,13 @@ export default function WorkspacePage() {
             <div className="py-4 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="relative w-64">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                   <input
                     type="text"
                     value={contentSearch}
                     onChange={(e) => setContentSearch(e.target.value)}
                     placeholder="Search boards..."
-                    className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#0073ea]"
+                    className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-border bg-muted/90 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#0073ea]"
                   />
                 </div>
 
@@ -1304,16 +1311,16 @@ export default function WorkspacePage() {
                   <Link
                     key={b.id}
                     href={`/board/${b.id}`}
-                    className="group flex items-center justify-between py-3 px-1 hover:bg-zinc-800/20 transition-colors"
+                    className="group flex items-center justify-between py-3 px-1 hover:bg-accent/20 transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <FileText className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
-                      <span className="text-xs font-medium text-white group-hover:text-[#57b6ff] transition-colors truncate">
+                      <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="text-xs font-medium text-foreground group-hover:text-[#57b6ff] transition-colors truncate">
                         {b.name}
                       </span>
                     </div>
 
-                    <div className="text-xs text-zinc-500">
+                    <div className="text-xs text-muted-foreground">
                       {tasks.filter((t) => t.boardId === b.id && !t.isArchived).length} tasks
                     </div>
                   </Link>
@@ -1327,13 +1334,13 @@ export default function WorkspacePage() {
             <div className="py-4 space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="relative w-64">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                   <input
                     type="text"
                     value={fileSearch}
                     onChange={(e) => setFileSearch(e.target.value)}
                     placeholder="Search files..."
-                    className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#0073ea]"
+                    className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-border bg-muted/90 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#0073ea]"
                   />
                 </div>
 
@@ -1343,18 +1350,9 @@ export default function WorkspacePage() {
                   hidden
                   onChange={handleFileSelect}
                 />
-                <button
-                  type="button"
-                  onClick={() => fileUploadInputRef.current?.click()}
-                  disabled={isUploadingFile}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0073ea] hover:bg-[#0060c0] disabled:opacity-50 text-white text-xs font-semibold shadow-xs transition-colors shrink-0"
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  <span>{isUploadingFile ? "Uploading..." : "Upload File"}</span>
-                </button>
               </div>
 
-              <p className="text-[11px] text-zinc-500">
+              <p className="text-[11px] text-muted-foreground">
                 PDF, Word, Excel, images, 3D models (.glb, .obj, .stl, ...) — any file type, up to{" "}
                 {Math.floor(MAX_FILE_BYTES / (1024 * 1024))}MB.
               </p>
@@ -1371,11 +1369,11 @@ export default function WorkspacePage() {
                   <div className="flex items-center gap-2.5">
                     {(() => {
                       const Icon = getFileIcon(pendingFile.type, pendingFile.name);
-                      return <Icon className="h-4 w-4 text-zinc-400 shrink-0" />;
+                      return <Icon className="h-4 w-4 text-muted-foreground shrink-0" />;
                     })()}
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-medium text-white truncate">{pendingFile.name}</p>
-                      <p className="text-[10px] text-zinc-500">{formatFileSize(pendingFile.size)}</p>
+                      <p className="text-xs font-medium text-foreground truncate">{pendingFile.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{formatFileSize(pendingFile.size)}</p>
                     </div>
                   </div>
                   <input
@@ -1388,14 +1386,14 @@ export default function WorkspacePage() {
                       if (e.key === "Escape") handleCancelPendingUpload();
                     }}
                     placeholder="Add a caption or note (optional)..."
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900/90 px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#0073ea]"
+                    className="w-full rounded-lg border border-border bg-muted/90 px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#0073ea]"
                   />
                   <div className="flex items-center justify-end gap-2">
                     <button
                       type="button"
                       onClick={handleCancelPendingUpload}
                       disabled={isUploadingFile}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-white transition-colors"
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-accent-foreground transition-colors"
                     >
                       Cancel
                     </button>
@@ -1413,15 +1411,15 @@ export default function WorkspacePage() {
               )}
 
               {isLoadingFiles ? (
-                <div className="py-16 text-center text-xs text-zinc-500">Loading files...</div>
+                <div className="py-16 text-center text-xs text-muted-foreground">Loading files...</div>
               ) : filteredFiles.length === 0 ? (
-                <div className="py-16 text-center rounded-2xl border border-dashed border-zinc-800 space-y-2">
-                  <FileIcon className="h-8 w-8 text-zinc-600 mx-auto" />
-                  <p className="text-sm font-semibold text-zinc-300">
+                <div className="py-16 text-center rounded-2xl border border-dashed border-border space-y-2">
+                  <FileIcon className="h-8 w-8 text-muted-foreground mx-auto" />
+                  <p className="text-sm font-semibold text-muted-foreground">
                     {files.length === 0 ? "No files yet" : "No files match your search"}
                   </p>
                   {files.length === 0 && (
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-muted-foreground">
                       Upload documents, spreadsheets, or 3D models for this workspace.
                     </p>
                   )}
@@ -1434,13 +1432,13 @@ export default function WorkspacePage() {
                     return (
                       <div
                         key={f.id}
-                        className="group flex items-center justify-between gap-3 py-3 px-1 hover:bg-zinc-800/20 transition-colors"
+                        className="group flex items-center justify-between gap-3 py-3 px-1 hover:bg-accent/20 transition-colors"
                       >
                         <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <Icon className="h-4 w-4 text-zinc-400 shrink-0" />
+                          <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium text-white truncate">{f.name}</p>
-                            <p className="text-[10px] text-zinc-500">
+                            <p className="text-xs font-medium text-foreground truncate">{f.name}</p>
+                            <p className="text-[10px] text-muted-foreground">
                               {formatFileSize(f.size)} · {uploader?.name || "Unknown"} ·{" "}
                               {formatDate(f.createdAt)}
                             </p>
@@ -1456,7 +1454,7 @@ export default function WorkspacePage() {
                                   if (e.key === "Escape") setEditingCaptionFileId(null);
                                 }}
                                 placeholder="Add a caption or note..."
-                                className="mt-1 w-full rounded border-b border-[#0073ea] bg-transparent text-[11px] text-zinc-200 placeholder:text-zinc-500 focus:outline-none"
+                                className="mt-1 w-full rounded border-b border-[#0073ea] bg-transparent text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none"
                               />
                             ) : (
                               <button
@@ -1465,13 +1463,13 @@ export default function WorkspacePage() {
                                 className="mt-0.5 flex items-center gap-1 text-[11px] text-left transition-colors group/caption"
                               >
                                 {f.caption ? (
-                                  <span className="text-zinc-400 truncate">{f.caption}</span>
+                                  <span className="text-muted-foreground truncate">{f.caption}</span>
                                 ) : (
-                                  <span className="text-zinc-600 italic opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <span className="text-muted-foreground italic opacity-0 group-hover:opacity-100 transition-opacity">
                                     + Add a caption
                                   </span>
                                 )}
-                                <Pencil className="h-2.5 w-2.5 text-zinc-600 opacity-0 group-hover:opacity-100 shrink-0 transition-opacity" />
+                                <Pencil className="h-2.5 w-2.5 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0 transition-opacity" />
                               </button>
                             )}
                           </div>
@@ -1482,7 +1480,7 @@ export default function WorkspacePage() {
                             href={f.dataUrl}
                             download={f.name}
                             title="Download"
-                            className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                            className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors"
                           >
                             <Download className="h-3.5 w-3.5" />
                           </a>
@@ -1490,7 +1488,7 @@ export default function WorkspacePage() {
                             type="button"
                             onClick={() => handleDeleteFile(f.id, f.name)}
                             title="Delete"
-                            className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                            className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -1523,7 +1521,7 @@ export default function WorkspacePage() {
                 {/* Month grid */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-semibold text-white">{monthLabel}</h3>
+                    <h3 className="text-sm font-semibold text-foreground">{monthLabel}</h3>
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
@@ -1532,7 +1530,7 @@ export default function WorkspacePage() {
                             new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1)
                           )
                         }
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors"
                       >
                         <ChevronLeft className="h-4 w-4" />
                       </button>
@@ -1543,7 +1541,7 @@ export default function WorkspacePage() {
                           setCalendarMonth(new Date(d.getFullYear(), d.getMonth(), 1));
                           setSelectedDay(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
                         }}
-                        className="px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                        className="px-2.5 py-1 rounded-lg text-xs font-medium text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors"
                       >
                         Today
                       </button>
@@ -1554,14 +1552,14 @@ export default function WorkspacePage() {
                             new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1)
                           )
                         }
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors"
                       >
                         <ChevronRight className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-7 gap-1 text-[9px] sm:text-[10px] text-zinc-500 uppercase font-semibold mb-1 px-0.5">
+                  <div className="grid grid-cols-7 gap-1 text-[9px] sm:text-[10px] text-muted-foreground uppercase font-semibold mb-1 px-0.5">
                     {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
                       <div key={d} className="text-center py-1">
                         {d}
@@ -1590,7 +1588,7 @@ export default function WorkspacePage() {
                             ? "border-[#0073ea] bg-[#0073ea]/10"
                             : holiday
                               ? "border-rose-900/30 bg-rose-950/10 hover:border-rose-700/50"
-                              : "border-transparent hover:bg-zinc-800/40"
+                              : "border-transparent hover:bg-accent/40"
                             } ${inMonth ? "" : "opacity-40"}`}
                         >
                           <span
@@ -1598,7 +1596,7 @@ export default function WorkspacePage() {
                               ? "flex h-5 w-5 items-center justify-center rounded-full bg-[#0073ea] text-white"
                               : holiday
                                 ? "text-rose-300 font-semibold"
-                                : "text-zinc-300"
+                                : "text-muted-foreground"
                               }`}
                           >
                             {day.getDate()}
@@ -1644,7 +1642,7 @@ export default function WorkspacePage() {
                     })}
                   </div>
 
-                  <div className="flex items-center gap-4 mt-3 text-[10px] text-zinc-500 flex-wrap">
+                  <div className="flex items-center gap-4 mt-3 text-[10px] text-muted-foreground flex-wrap">
                     <span className="flex items-center gap-1.5">
                       <span className="h-1.5 w-1.5 rounded-full bg-blue-400" /> Task due
                     </span>
@@ -1658,9 +1656,9 @@ export default function WorkspacePage() {
                 </div>
 
                 {/* Day panel */}
-                <div className="w-full lg:w-80 lg:shrink-0 border-t lg:border-t-0 lg:border-l border-zinc-800 pt-4 lg:pt-0 lg:pl-6">
+                <div className="w-full lg:w-80 lg:shrink-0 border-t lg:border-t-0 lg:border-l border-border pt-4 lg:pt-0 lg:pl-6">
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-sm font-semibold text-white">
+                    <h4 className="text-sm font-semibold text-foreground">
                       {selectedDay.toLocaleDateString("en-US", {
                         weekday: "short",
                         month: "short",
@@ -1695,12 +1693,12 @@ export default function WorkspacePage() {
                   )}
 
                   {isLoadingAppointments ? (
-                    <div className="py-10 text-center text-xs text-zinc-500">Loading...</div>
+                    <div className="py-10 text-center text-xs text-muted-foreground">Loading...</div>
                   ) : (
                     <div className="space-y-4">
                       {selectedDayAppointments.length > 0 && (
                         <div className="space-y-1.5">
-                          <p className="text-[10px] font-semibold text-zinc-500 uppercase">
+                          <p className="text-[10px] font-semibold text-muted-foreground uppercase">
                             Appointments
                           </p>
                           {selectedDayAppointments.map((a) => {
@@ -1712,10 +1710,10 @@ export default function WorkspacePage() {
                                 className="group flex items-start justify-between gap-2 p-2.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20"
                               >
                                 <div className="min-w-0">
-                                  <p className="text-xs font-medium text-white truncate">
+                                  <p className="text-xs font-medium text-foreground truncate">
                                     {a.title}
                                   </p>
-                                  <p className="text-[10px] text-zinc-500">
+                                  <p className="text-[10px] text-muted-foreground">
                                     {a.startAt.toLocaleTimeString([], {
                                       hour: "2-digit",
                                       minute: "2-digit",
@@ -1723,7 +1721,7 @@ export default function WorkspacePage() {
                                     {creator ? ` · ${creator.name}` : ""}
                                   </p>
                                   {a.notes && (
-                                    <p className="text-[10px] text-zinc-400 mt-0.5">{a.notes}</p>
+                                    <p className="text-[10px] text-muted-foreground mt-0.5">{a.notes}</p>
                                   )}
                                 </div>
                                 {canDelete && (
@@ -1731,7 +1729,7 @@ export default function WorkspacePage() {
                                     type="button"
                                     onClick={() => handleDeleteAppointment(a.id)}
                                     title="Delete"
-                                    className="opacity-0 group-hover:opacity-100 shrink-0 text-zinc-500 hover:text-rose-400 transition-colors"
+                                    className="opacity-0 group-hover:opacity-100 shrink-0 text-muted-foreground hover:text-rose-400 transition-colors"
                                   >
                                     <Trash2 className="h-3 w-3" />
                                   </button>
@@ -1744,7 +1742,7 @@ export default function WorkspacePage() {
 
                       {selectedDayTasks.length > 0 && (
                         <div className="space-y-1.5">
-                          <p className="text-[10px] font-semibold text-zinc-500 uppercase">
+                          <p className="text-[10px] font-semibold text-muted-foreground uppercase">
                             Tasks Due
                           </p>
                           {selectedDayTasks.map((t) => {
@@ -1756,10 +1754,10 @@ export default function WorkspacePage() {
                                 className="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-blue-500/5 border border-blue-500/20 hover:bg-blue-500/10 transition-colors"
                               >
                                 <div className="min-w-0">
-                                  <p className="text-xs font-medium text-white truncate">
+                                  <p className="text-xs font-medium text-foreground truncate">
                                     {t.title}
                                   </p>
-                                  <p className="text-[10px] text-zinc-500 truncate">
+                                  <p className="text-[10px] text-muted-foreground truncate">
                                     {board?.name || "Board"}
                                   </p>
                                 </div>
@@ -1770,7 +1768,7 @@ export default function WorkspacePage() {
                       )}
 
                       {selectedDayAppointments.length === 0 && selectedDayTasks.length === 0 && (
-                        <p className="text-xs text-zinc-500 text-center py-8">
+                        <p className="text-xs text-muted-foreground text-center py-8">
                           Nothing scheduled for this day.
                         </p>
                       )}
@@ -1840,10 +1838,10 @@ export default function WorkspacePage() {
                         checked={allRemovableSelected}
                         onChange={toggleSelectAllMembers}
                         title="Select all"
-                        className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 cursor-pointer accent-[#0073ea]"
+                        className="h-3.5 w-3.5 rounded border-border bg-muted cursor-pointer accent-[#0073ea]"
                       />
                     )}
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                       Workspace Members
                     </h3>
                   </div>
@@ -1884,7 +1882,7 @@ export default function WorkspacePage() {
                               disabled={isSelf || isOwner}
                               onChange={() => toggleSelectMember(member.userId)}
                               title={disabledReason || "Select"}
-                              className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 cursor-pointer accent-[#0073ea] disabled:opacity-30 disabled:cursor-not-allowed"
+                              className="h-3.5 w-3.5 rounded border-border bg-muted cursor-pointer accent-[#0073ea] disabled:opacity-30 disabled:cursor-not-allowed"
                             />
                           )}
                           <div
@@ -1894,13 +1892,13 @@ export default function WorkspacePage() {
                             {u.avatarInitials || u.name.charAt(0)}
                           </div>
                           <div>
-                            <div className="text-xs font-medium text-white">
+                            <div className="text-xs font-medium text-foreground">
                               {u.name}
                               {isSelf && (
-                                <span className="text-zinc-500 font-normal"> (you)</span>
+                                <span className="text-muted-foreground font-normal"> (you)</span>
                               )}
                             </div>
-                            <div className="text-[10px] text-zinc-500">{u.email}</div>
+                            <div className="text-[10px] text-muted-foreground">{u.email}</div>
                           </div>
                         </div>
 
@@ -1912,7 +1910,7 @@ export default function WorkspacePage() {
                               overdue: 0,
                             };
                             return (
-                              <div className="hidden sm:flex items-center gap-3 text-[11px] text-zinc-500 tabular-nums">
+                              <div className="hidden sm:flex items-center gap-3 text-[11px] text-muted-foreground tabular-nums">
                                 <span
                                   className="flex items-center gap-1"
                                   title={`${stats.assigned} assigned task${stats.assigned === 1 ? "" : "s"}`}
@@ -1939,7 +1937,7 @@ export default function WorkspacePage() {
                               </div>
                             );
                           })()}
-                          <span className="text-xs text-zinc-400 font-medium shrink-0">
+                          <span className="text-xs text-muted-foreground font-medium shrink-0">
                             {roleLabel}
                           </span>
                         </div>
@@ -1953,8 +1951,8 @@ export default function WorkspacePage() {
                 {selectedMemberIds.length > 0 &&
                   createPortal(
                     <div className="fixed inset-x-0 bottom-5 z-50 flex justify-center px-4 pointer-events-none animate-in slide-in-from-bottom-2 fade-in duration-200">
-                      <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-zinc-700 bg-[#1c1e28] pl-4 pr-2 py-2 shadow-2xl shadow-black/40">
-                        <span className="flex items-center gap-2 pr-3 mr-1 border-r border-zinc-700 text-xs font-semibold text-white whitespace-nowrap">
+                      <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-border bg-popover pl-4 pr-2 py-2 shadow-2xl shadow-black/40">
+                        <span className="flex items-center gap-2 pr-3 mr-1 border-r border-border text-xs font-semibold text-foreground whitespace-nowrap">
                           <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0073ea] px-1.5 text-[11px] font-bold text-white">
                             {selectedMemberIds.length}
                           </span>
@@ -1971,13 +1969,13 @@ export default function WorkspacePage() {
                           <span>{isRemovingMembers ? "Removing..." : "Remove from workspace"}</span>
                         </button>
 
-                        <div className="mx-1 h-5 w-px bg-zinc-700" />
+                        <div className="mx-1 h-5 w-px bg-border" />
 
                         <button
                           type="button"
                           onClick={() => setSelectedMemberIds([])}
                           title="Clear selection"
-                          className="flex items-center justify-center h-7 w-7 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+                          className="flex items-center justify-center h-7 w-7 rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
@@ -2004,11 +2002,11 @@ export default function WorkspacePage() {
             aria-hidden="true"
           />
 
-          <div className="relative w-full max-w-md rounded-2xl border border-zinc-700 bg-[#1c1e28] p-5 sm:p-6 text-zinc-100 shadow-2xl z-10 space-y-4 max-h-[88vh] overflow-y-auto animate-in zoom-in-95 duration-150">
+          <div className="relative w-full max-w-md rounded-2xl border border-border bg-popover p-5 sm:p-6 text-foreground shadow-2xl z-10 space-y-4 max-h-[88vh] overflow-y-auto animate-in zoom-in-95 duration-150">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-base font-bold text-white">New Appointment</h3>
-                <p className="text-[11px] text-zinc-500 mt-0.5">
+                <h3 className="text-base font-bold text-foreground">New Appointment</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
                   {selectedDay.toLocaleDateString("en-US", {
                     weekday: "long",
                     month: "long",
@@ -2019,55 +2017,55 @@ export default function WorkspacePage() {
               <button
                 type="button"
                 onClick={() => setIsCreatingAppointment(false)}
-                className="text-zinc-500 hover:text-white p-1 rounded-md hover:bg-zinc-800 shrink-0"
+                className="text-muted-foreground hover:text-accent-foreground p-1 rounded-md hover:bg-accent shrink-0"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             <div className="space-y-1">
-              <label className="text-[11px] font-medium text-zinc-400">Title</label>
+              <label className="text-[11px] font-medium text-muted-foreground">Title</label>
               <input
                 type="text"
                 autoFocus
                 value={newApptTitle}
                 onChange={(e) => setNewApptTitle(e.target.value)}
                 placeholder="e.g. Weekly sync with design team"
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900/90 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#0073ea]"
+                className="w-full rounded-lg border border-border bg-muted/90 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#0073ea]"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-[11px] font-medium text-zinc-400">Notes (optional)</label>
+              <label className="text-[11px] font-medium text-muted-foreground">Notes (optional)</label>
               <textarea
                 value={newApptNotes}
                 onChange={(e) => setNewApptNotes(e.target.value)}
                 placeholder="Agenda, meeting link, location..."
                 rows={3}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900/90 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#0073ea] resize-none"
+                className="w-full rounded-lg border border-border bg-muted/90 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#0073ea] resize-none"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-[11px] font-medium text-zinc-400 flex items-center gap-1">
+                <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
                   <Clock className="h-3 w-3" /> Time
                 </label>
                 <input
                   type="time"
                   value={newApptTime}
                   onChange={(e) => setNewApptTime(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900/90 px-2.5 py-2 text-sm text-white focus:outline-none focus:border-[#0073ea]"
+                  className="w-full rounded-lg border border-border bg-muted/90 px-2.5 py-2 text-sm text-foreground focus:outline-none focus:border-[#0073ea]"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] font-medium text-zinc-400 flex items-center gap-1">
+                <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
                   <Bell className="h-3 w-3" /> Reminder
                 </label>
                 <select
                   value={newApptReminder}
                   onChange={(e) => setNewApptReminder(Number(e.target.value))}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900/90 px-2.5 py-2 text-sm text-white focus:outline-none focus:border-[#0073ea]"
+                  className="w-full rounded-lg border border-border bg-muted/90 px-2.5 py-2 text-sm text-foreground focus:outline-none focus:border-[#0073ea]"
                 >
                   <option value={10}>10m before</option>
                   <option value={30}>30m before</option>
@@ -2078,7 +2076,7 @@ export default function WorkspacePage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-medium text-zinc-400">
+              <label className="text-[11px] font-medium text-muted-foreground">
                 Attendees (none selected = everyone in this workspace)
               </label>
               <div className="flex flex-wrap gap-1.5">
@@ -2088,8 +2086,8 @@ export default function WorkspacePage() {
                     type="button"
                     onClick={() => toggleAttendee(u.id)}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs border transition-colors cursor-pointer ${newApptAttendeeIds.includes(u.id)
-                      ? "border-[#0073ea] bg-[#0073ea]/20 text-white"
-                      : "border-zinc-700 text-zinc-400 hover:text-white"
+                      ? "border-[#0073ea] bg-[#0073ea]/20 text-[#0073ea]"
+                      : "border-border text-muted-foreground hover:text-accent-foreground"
                       }`}
                   >
                     <span
@@ -2105,11 +2103,11 @@ export default function WorkspacePage() {
 
             {apptFormError && <p className="text-xs text-rose-400">{apptFormError}</p>}
 
-            <div className="pt-2 flex items-center justify-end gap-2 border-t border-zinc-800">
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-border">
               <button
                 type="button"
                 onClick={() => setIsCreatingAppointment(false)}
-                className="px-4 py-2 rounded-xl text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                className="px-4 py-2 rounded-xl text-xs font-medium text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors"
               >
                 Cancel
               </button>
@@ -2138,26 +2136,26 @@ export default function WorkspacePage() {
             aria-hidden="true"
           />
 
-          <div className="relative w-full max-w-md rounded-2xl border border-zinc-700 bg-[#1c1e28] p-6 text-zinc-100 shadow-2xl z-10 space-y-4 animate-in zoom-in-95 duration-150">
+          <div className="relative w-full max-w-md rounded-2xl border border-border bg-popover p-6 text-foreground shadow-2xl z-10 space-y-4 animate-in zoom-in-95 duration-150">
             <div className="flex items-center gap-3 text-rose-400">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-500/20 border border-rose-500/30">
                 <AlertTriangle className="h-5 w-5" />
               </div>
-              <h3 className="text-base font-bold text-white">
+              <h3 className="text-base font-bold text-foreground">
                 Delete "{currentWs.name}"?
               </h3>
             </div>
 
-            <p className="text-xs text-zinc-400 leading-relaxed">
+            <p className="text-xs text-muted-foreground leading-relaxed">
               Are you sure you want to delete this workspace? This will remove all
               custom settings and cannot be undone.
             </p>
 
-            <div className="pt-2 flex items-center justify-end gap-2 border-t border-zinc-800">
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-border">
               <button
                 type="button"
                 onClick={() => setIsDeleteDialogOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                className="px-4 py-2 rounded-xl text-xs font-medium text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors"
               >
                 Cancel
               </button>

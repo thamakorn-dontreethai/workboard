@@ -274,6 +274,14 @@ interface WorkBoardContextType {
     notifyPostComments?: boolean;
     notifyNewPosts?: boolean;
   }) => Promise<void>;
+  updateProfile: (updates: {
+    name?: string;
+    avatarColor?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  changePassword: (
+    currentPassword: string,
+    newPassword: string
+  ) => Promise<{ success: boolean; error?: string }>;
 
   // Computed Selectors
   getUserById: (id: string) => User | undefined;
@@ -298,6 +306,13 @@ const STORAGE_KEY = "workboard_state_v5";
 // per-browser convenience remembering which workspace tab was last open,
 // so a refresh doesn't always dump you back on the first one.
 const ACTIVE_WORKSPACE_KEY = "workboard_active_workspace_id";
+
+// Free alternative to a real-time backend (WebSocket/SSE would need a
+// persistent server process, which this app's serverless API routes don't
+// have): just silently re-fetch on an interval so other people's changes —
+// and new notifications — show up without a manual refresh. Paused while
+// the tab is hidden so a background tab doesn't keep polling for nothing.
+const POLL_INTERVAL_MS = 15000;
 
 // Stand-in for "this user has no workspace at all" (a brand-new,
 // not-yet-invited account, or right after logging out). `id: ""` can
@@ -500,8 +515,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     }
 
     hydrateFromServer();
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") hydrateFromServer();
+    }, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, []);
 
@@ -514,65 +533,73 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated || !currentUser?.id) return;
     let cancelled = false;
 
-    let activeWorkspaceIdHint: string | null = null;
-    try {
-      activeWorkspaceIdHint = localStorage.getItem(ACTIVE_WORKSPACE_KEY);
-    } catch {
-      // ignore — localStorage unavailable
+    function hydratePerUser() {
+      let activeWorkspaceIdHint: string | null = null;
+      try {
+        activeWorkspaceIdHint = localStorage.getItem(ACTIVE_WORKSPACE_KEY);
+      } catch {
+        // ignore — localStorage unavailable
+      }
+
+      fetch(`/api/workspaces?userId=${encodeURIComponent(currentUser!.id)}`)
+        .then((r) => r.json())
+        .then((res) => {
+          if (cancelled || !res?.success || !Array.isArray(res.workspaces)) return;
+          const list: Workspace[] = res.workspaces;
+          setWorkspaces(list);
+          if (list.length > 0) {
+            const preferred = activeWorkspaceIdHint
+              ? list.find((w) => w.id === activeWorkspaceIdHint)
+              : undefined;
+            setWorkspace(preferred || res.data || list[0]);
+          } else {
+            // This user genuinely has no workspace — without this, `workspace`
+            // keeps whatever was active before (a previous account's, on a
+            // shared browser/tab), and every "current workspace" filter
+            // elsewhere would keep matching it.
+            setWorkspace(EMPTY_WORKSPACE);
+          }
+        })
+        .catch((err) => console.error("Failed to hydrate workspaces:", err));
+
+      fetch(`/api/notifications?userId=${encodeURIComponent(currentUser!.id)}`)
+        .then((r) => r.json())
+        .then((res) => {
+          if (cancelled || !res?.success || !Array.isArray(res.data)) return;
+          setNotifications(
+            res.data.map((n: Notification) => ({
+              ...n,
+              createdAt: new Date(n.createdAt),
+            }))
+          );
+        })
+        .catch((err) => console.error("Failed to hydrate notifications:", err));
+
+      fetch(`/api/todos?userId=${encodeURIComponent(currentUser!.id)}`)
+        .then((r) => r.json())
+        .then((res) => {
+          if (cancelled || !res?.success || !Array.isArray(res.data)) return;
+          setPersonalTodos(
+            res.data.map((t: PersonalTodo) => ({
+              ...t,
+              dueAt: t.dueAt ? new Date(t.dueAt) : null,
+              reminderSentAt: t.reminderSentAt ? new Date(t.reminderSentAt) : null,
+              createdAt: new Date(t.createdAt),
+              updatedAt: new Date(t.updatedAt),
+            }))
+          );
+        })
+        .catch((err) => console.error("Failed to hydrate personal to-dos:", err));
     }
 
-    fetch(`/api/workspaces?userId=${encodeURIComponent(currentUser.id)}`)
-      .then((r) => r.json())
-      .then((res) => {
-        if (cancelled || !res?.success || !Array.isArray(res.workspaces)) return;
-        const list: Workspace[] = res.workspaces;
-        setWorkspaces(list);
-        if (list.length > 0) {
-          const preferred = activeWorkspaceIdHint
-            ? list.find((w) => w.id === activeWorkspaceIdHint)
-            : undefined;
-          setWorkspace(preferred || res.data || list[0]);
-        } else {
-          // This user genuinely has no workspace — without this, `workspace`
-          // keeps whatever was active before (a previous account's, on a
-          // shared browser/tab), and every "current workspace" filter
-          // elsewhere would keep matching it.
-          setWorkspace(EMPTY_WORKSPACE);
-        }
-      })
-      .catch((err) => console.error("Failed to hydrate workspaces:", err));
-
-    fetch(`/api/notifications?userId=${encodeURIComponent(currentUser.id)}`)
-      .then((r) => r.json())
-      .then((res) => {
-        if (cancelled || !res?.success || !Array.isArray(res.data)) return;
-        setNotifications(
-          res.data.map((n: Notification) => ({
-            ...n,
-            createdAt: new Date(n.createdAt),
-          }))
-        );
-      })
-      .catch((err) => console.error("Failed to hydrate notifications:", err));
-
-    fetch(`/api/todos?userId=${encodeURIComponent(currentUser.id)}`)
-      .then((r) => r.json())
-      .then((res) => {
-        if (cancelled || !res?.success || !Array.isArray(res.data)) return;
-        setPersonalTodos(
-          res.data.map((t: PersonalTodo) => ({
-            ...t,
-            dueAt: t.dueAt ? new Date(t.dueAt) : null,
-            reminderSentAt: t.reminderSentAt ? new Date(t.reminderSentAt) : null,
-            createdAt: new Date(t.createdAt),
-            updatedAt: new Date(t.updatedAt),
-          }))
-        );
-      })
-      .catch((err) => console.error("Failed to hydrate personal to-dos:", err));
+    hydratePerUser();
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") hydratePerUser();
+    }, POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, [isAuthenticated, currentUser?.id]);
 
@@ -876,6 +903,51 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       }
     },
     [currentUser, users, workspace, tasks, activities, notifications, persistState]
+  );
+
+  const updateProfile = useCallback(
+    async (updates: { name?: string; avatarColor?: string }) => {
+      try {
+        const res = await fetch(`/api/users/${currentUser.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        });
+        const result = await res.json();
+        if (!result?.success) {
+          return { success: false, error: result?.error || "Failed to update profile" };
+        }
+        const updatedUser: User = { ...currentUser, ...result.data };
+        setCurrentUser(updatedUser);
+        const updatedUsers = users.map((u) => (u.id === currentUser.id ? updatedUser : u));
+        setUsers(updatedUsers);
+        persistState(updatedUsers, workspace, tasks, activities, notifications, updatedUser);
+        return { success: true };
+      } catch (err: any) {
+        return { success: false, error: err.message || "Network error" };
+      }
+    },
+    [currentUser, users, workspace, tasks, activities, notifications, persistState]
+  );
+
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      try {
+        const res = await fetch("/api/auth/change-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ currentPassword, newPassword }),
+        });
+        const result = await res.json();
+        if (!result?.success) {
+          return { success: false, error: result?.error || "Failed to change password" };
+        }
+        return { success: true };
+      } catch (err: any) {
+        return { success: false, error: err.message || "Network error" };
+      }
+    },
+    []
   );
 
   const assignTask = useCallback(
@@ -2080,6 +2152,50 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, [isAuthenticated, currentUser?.id, workspace.id]);
 
+  // ─── Task Due-Date Reminders (in-app + LINE) ───────────────────────────
+  // Same "any open client nudges the server, server claims + dedupes"
+  // pattern as the appointment reminders above.
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser?.id || !workspace.id) return;
+
+    const checkTaskDueReminders = () => {
+      fetch("/api/tasks/check-due-reminders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: workspace.id }),
+      })
+        .then((r) => r.json())
+        .then((res) => {
+          if (!res?.success || !Array.isArray(res.data?.notifications)) return;
+          const mine: Notification[] = res.data.notifications
+            .filter((n: Notification) => n.userId === currentUser.id)
+            .map((n: Notification) => ({ ...n, createdAt: new Date(n.createdAt) }));
+          if (mine.length === 0) return;
+
+          setNotifications((prev) => {
+            const existingIds = new Set(prev.map((n) => n.id));
+            const fresh = mine.filter((n) => !existingIds.has(n.id));
+            return fresh.length > 0 ? [...fresh, ...prev] : prev;
+          });
+
+          if (
+            typeof window !== "undefined" &&
+            "Notification" in window &&
+            Notification.permission === "granted"
+          ) {
+            mine.forEach((n) => {
+              new Notification(n.title, { body: n.body });
+            });
+          }
+        })
+        .catch((err) => console.error("Failed to check task due reminders:", err));
+    };
+
+    checkTaskDueReminders();
+    const dueInterval = setInterval(checkTaskDueReminders, 30000);
+    return () => clearInterval(dueInterval);
+  }, [isAuthenticated, currentUser?.id, workspace.id]);
+
   const openTaskModal = useCallback(
     (taskId: string, tab: "details" | "activity" = "details") => {
       setActiveTaskId(taskId);
@@ -2891,6 +3007,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       acceptBoardInvite,
 
       updateNotificationPreferences,
+      updateProfile,
+      changePassword,
 
       getUserById,
       getTasksByAssignee,
@@ -3009,6 +3127,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       canDo,
       isWorkspaceLeader,
       updateNotificationPreferences,
+      updateProfile,
+      changePassword,
       getUserById,
       getTasksByAssignee,
       getTasksByBoard,

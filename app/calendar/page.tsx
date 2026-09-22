@@ -15,6 +15,7 @@ import {
 } from "@/types";
 import { formatDate, isOverdue } from "@/lib/utils/date";
 import { getThaiHolidayForDate, ThaiHoliday } from "@/lib/utils/thaiHolidays";
+import { PRIORITY_ICON } from "@/lib/utils/task";
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -452,15 +453,15 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#14151c] text-zinc-100 overflow-hidden font-sans select-none animate-in fade-in duration-200">
+    <div className="flex flex-col h-full bg-background text-foreground overflow-hidden font-sans select-none animate-in fade-in duration-200">
       {/* ─── Top Main Header ────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-3 px-4 sm:px-6 pt-4 pb-3 border-b border-[#262836] bg-[#181922] shrink-0">
+      <div className="flex flex-col gap-3 px-4 sm:px-6 pt-4 pb-3 border-b border-border bg-card shrink-0">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Left: Title & Breadcrumb */}
           <div className="flex items-center gap-3 min-w-0">
             <Link
               href="/"
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2e3144] bg-[#1f212c] text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors shrink-0"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors shrink-0"
               title="Return to Dashboard"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -471,7 +472,7 @@ export default function CalendarPage() {
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/15 text-sky-400 border border-sky-500/20">
                   <CalendarIcon className="h-4 w-4" />
                 </span>
-                <h1 className="text-xl font-bold text-white tracking-tight truncate">
+                <h1 className="text-xl font-bold text-foreground tracking-tight truncate">
                   Monthly Task Calendar
                 </h1>
                 <span className="rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-400 px-2.5 py-0.5 text-xs font-semibold">
@@ -479,7 +480,7 @@ export default function CalendarPage() {
                 </span>
               </div>
               {(workspaceFilter !== "all" || boardFilter !== "all") && (
-                <p className="text-xs text-zinc-400 truncate mt-0.5">
+                <p className="text-xs text-muted-foreground truncate mt-0.5">
                   {workspaceFilter !== "all"
                     ? `Showing tasks from ${workspaces.find((w) => w.id === workspaceFilter)?.name || "selected workspace"}`
                     : `Showing tasks from ${boards.find((b) => b.id === boardFilter)?.name || "selected board"}`}
@@ -496,7 +497,7 @@ export default function CalendarPage() {
                 onClick={() => setShowUnscheduled(!showUnscheduled)}
                 className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${showUnscheduled
                     ? "border-amber-500/50 bg-amber-500/15 text-amber-300"
-                    : "border-[#2e3144] bg-[#1f212c] text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                    : "border-border bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   }`}
               >
                 <Clock className="h-3.5 w-3.5 text-amber-400" />
@@ -509,7 +510,7 @@ export default function CalendarPage() {
               onClick={() => setShowSidePanel(!showSidePanel)}
               className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${showSidePanel
                   ? "border-indigo-500/50 bg-indigo-600/10 text-indigo-400"
-                  : "border-[#2e3144] bg-[#1f212c] text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                  : "border-border bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                 }`}
             >
               <List className="h-3.5 w-3.5" />
@@ -520,23 +521,23 @@ export default function CalendarPage() {
       </div>
 
       {/* ─── Control Toolbar (Month Picker, View Modes, Filters) ─────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-2.5 bg-[#181922] border-b border-[#262836] text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-2.5 bg-card border-b border-border text-xs">
         {/* Left: Month Navigator */}
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={goToToday}
-            className="px-2.5 py-1 rounded-lg border border-[#2e3144] bg-[#1f212c] text-zinc-200 hover:text-white hover:bg-zinc-800 transition-colors font-medium text-xs"
+            className="px-2.5 py-1 rounded-lg border border-border bg-muted text-foreground hover:text-accent-foreground hover:bg-accent transition-colors font-medium text-xs"
           >
             Today
           </button>
 
-          <div className="flex items-center rounded-lg border border-[#2e3144] bg-[#1f212c] overflow-hidden">
+          <div className="flex items-center rounded-lg border border-border bg-muted overflow-hidden">
             <button
               type="button"
               onClick={prevMonth}
               title="Previous Month"
-              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+              className="p-1.5 text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -544,13 +545,13 @@ export default function CalendarPage() {
               type="button"
               onClick={nextMonth}
               title="Next Month"
-              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+              className="p-1.5 text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
 
-          <span className="text-sm font-bold text-white pl-1 tracking-tight">
+          <span className="text-sm font-bold text-foreground pl-1 tracking-tight">
             {monthNames[month]} {year}
           </span>
         </div>
@@ -559,19 +560,19 @@ export default function CalendarPage() {
         <div className="flex flex-wrap items-center gap-2">
 
           {/* Workspace Filter */}
-          <div className="flex items-center gap-1 bg-[#1f212c] border border-[#2e3144] rounded-lg px-2 py-0.5">
-            <Building2 className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+          <div className="flex items-center gap-1 bg-muted border border-border rounded-lg px-2 py-0.5">
+            <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <select
               value={workspaceFilter}
               onChange={(e) => setWorkspaceFilter(e.target.value)}
               aria-label="Filter tasks by workspace"
-              className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer py-1 pr-1 font-medium"
+              className="bg-transparent text-xs text-foreground focus:outline-none cursor-pointer py-1 pr-1 font-medium"
             >
-              <option value="all" className="bg-[#1c1e28] text-white">
+              <option value="all" className="bg-muted text-foreground">
                 🏢 All Workspace (ทั้งหมด)
               </option>
               {workspaces.map((w) => (
-                <option key={w.id} value={w.id} className="bg-[#1c1e28] text-white">
+                <option key={w.id} value={w.id} className="bg-muted text-foreground">
                   {w.name}
                 </option>
               ))}
@@ -579,19 +580,19 @@ export default function CalendarPage() {
           </div>
 
           {/* Board Filter */}
-          <div className="flex items-center gap-1 bg-[#1f212c] border border-[#2e3144] rounded-lg px-2 py-0.5">
-            <Briefcase className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+          <div className="flex items-center gap-1 bg-muted border border-border rounded-lg px-2 py-0.5">
+            <Briefcase className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <select
               value={boardFilter}
               onChange={(e) => setBoardFilter(e.target.value)}
               aria-label="Filter tasks by board"
-              className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer py-1 pr-1"
+              className="bg-transparent text-xs text-foreground focus:outline-none cursor-pointer py-1 pr-1"
             >
-              <option value="all" className="bg-[#1c1e28] text-white">
+              <option value="all" className="bg-muted text-foreground">
                 All Boards
               </option>
               {boardsInScope.map((b) => (
-                <option key={b.id} value={b.id} className="bg-[#1c1e28] text-white">
+                <option key={b.id} value={b.id} className="bg-muted text-foreground">
                   {b.name}
                 </option>
               ))}
@@ -599,19 +600,19 @@ export default function CalendarPage() {
           </div>
 
           {/* Status Filter */}
-          <div className="flex items-center gap-1 bg-[#1f212c] border border-[#2e3144] rounded-lg px-2 py-0.5">
-            <Filter className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+          <div className="flex items-center gap-1 bg-muted border border-border rounded-lg px-2 py-0.5">
+            <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               aria-label="Filter tasks by status"
-              className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer py-1 pr-1"
+              className="bg-transparent text-xs text-foreground focus:outline-none cursor-pointer py-1 pr-1"
             >
-              <option value="all" className="bg-[#1c1e28] text-white">
+              <option value="all" className="bg-muted text-foreground">
                 All Statuses
               </option>
               {Object.entries(TASK_STATUS_CONFIG).map(([k, v]) => (
-                <option key={k} value={k} className="bg-[#1c1e28] text-white">
+                <option key={k} value={k} className="bg-muted text-foreground">
                   {v.label}
                 </option>
               ))}
@@ -620,19 +621,19 @@ export default function CalendarPage() {
 
           {/* Search bar */}
           <div className="relative">
-            <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-zinc-500" />
+            <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search tasks..."
-              className="w-28 sm:w-40 rounded-lg border border-[#2e3144] bg-[#1f212c] pl-7 pr-2 py-1 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+              className="w-28 sm:w-40 rounded-lg border border-border bg-muted pl-7 pr-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-indigo-500"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery("")}
-                className="absolute right-1.5 top-1.5 text-zinc-400 hover:text-white"
+                className="absolute right-1.5 top-1.5 text-muted-foreground hover:text-accent-foreground"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -640,14 +641,14 @@ export default function CalendarPage() {
           </div>
 
           {/* View mode buttons */}
-          <div className="flex items-center rounded-lg border border-[#2e3144] bg-[#1f212c] p-0.5">
+          <div className="flex items-center rounded-lg border border-border bg-muted p-0.5">
             <button
               type="button"
               onClick={() => setViewMode("month")}
               title="Month Grid"
               className={`p-1 rounded-md transition-colors ${viewMode === "month"
                   ? "bg-indigo-600 text-white shadow-xs font-semibold"
-                  : "text-zinc-400 hover:text-white"
+                  : "text-muted-foreground hover:text-accent-foreground"
                 }`}
             >
               <LayoutGrid className="h-3.5 w-3.5" />
@@ -658,7 +659,7 @@ export default function CalendarPage() {
               title="Agenda Timeline"
               className={`p-1 rounded-md transition-colors ${viewMode === "agenda"
                   ? "bg-indigo-600 text-white shadow-xs font-semibold"
-                  : "text-zinc-400 hover:text-white"
+                  : "text-muted-foreground hover:text-accent-foreground"
                 }`}
             >
               <List className="h-3.5 w-3.5" />
@@ -669,28 +670,28 @@ export default function CalendarPage() {
 
       {/* ─── Unscheduled Tasks Backlog Drawer (If Open) ──────────────────── */}
       {showUnscheduled && (
-        <div className="bg-[#191b26] border-b border-[#292c3d] p-3 animate-in slide-in-from-top duration-200">
+        <div className="bg-muted border-b border-border p-3 animate-in slide-in-from-top duration-200">
           <div className="flex items-center justify-between pb-2">
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-amber-400" />
-              <span className="text-xs font-bold text-white uppercase tracking-wider">
+              <span className="text-xs font-bold text-foreground uppercase tracking-wider">
                 Unscheduled Tasks Backlog ({unscheduledTasks.length})
               </span>
-              <span className="text-[11px] text-zinc-400">
+              <span className="text-[11px] text-muted-foreground">
                 Click &quot;Schedule&quot; to assign task to selected date ({formatDate(selectedDate)})
               </span>
             </div>
             <button
               type="button"
               onClick={() => setShowUnscheduled(false)}
-              className="text-zinc-400 hover:text-white text-xs"
+              className="text-muted-foreground hover:text-accent-foreground text-xs"
             >
               Close
             </button>
           </div>
 
           {unscheduledTasks.length === 0 ? (
-            <p className="text-xs text-zinc-500 py-2">
+            <p className="text-xs text-muted-foreground py-2">
               All tasks currently have scheduled due dates!
             </p>
           ) : (
@@ -700,16 +701,16 @@ export default function CalendarPage() {
                 return (
                   <div
                     key={task.id}
-                    className="p-2 rounded-lg bg-[#14151e] border border-[#292c3d] flex items-center justify-between gap-2 hover:border-indigo-500/40 transition-colors"
+                    className="p-2 rounded-lg bg-card border border-border flex items-center justify-between gap-2 hover:border-indigo-500/40 transition-colors"
                   >
                     <div
                       onClick={() => openTaskModal(task.id)}
                       className="min-w-0 flex-1 cursor-pointer"
                     >
-                      <p className="text-xs font-medium text-zinc-200 truncate hover:text-white">
+                      <p className="text-xs font-medium text-foreground truncate hover:text-accent-foreground">
                         {task.title}
                       </p>
-                      <span className="text-[10px] text-zinc-500">
+                      <span className="text-[10px] text-muted-foreground">
                         {boardInfo.name}
                       </span>
                     </div>
@@ -718,7 +719,7 @@ export default function CalendarPage() {
                       type="button"
                       onClick={() => handleScheduleTask(task.id, selectedDate)}
                       title={`Schedule to ${selectedDate.toLocaleDateString()}`}
-                      className="flex items-center gap-1 px-2 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white text-[10px] font-semibold transition-colors shrink-0"
+                      className="flex items-center gap-1 px-2 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-accent-foreground text-[10px] font-semibold transition-colors shrink-0"
                     >
                       <CalendarCheck2 className="h-3 w-3" />
                       <span>Schedule</span>
@@ -734,7 +735,7 @@ export default function CalendarPage() {
       {/* ─── Main Content Area (Split Grid + Detail Drawer) ─────────────── */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left / Center: Month Grid or Agenda View */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-[#14151c]">
+        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-background">
           {viewMode === "month" ? (
             <div className="flex-1 flex flex-col p-3 sm:p-4 min-w-[700px]">
               {/* Day headers: Sun - Sat */}
@@ -744,7 +745,7 @@ export default function CalendarPage() {
                     key={d}
                     className={`py-1.5 text-[11px] font-bold uppercase tracking-wider ${index === 0 || index === 6
                         ? "text-rose-400/80"
-                        : "text-zinc-400"
+                        : "text-muted-foreground"
                       }`}
                   >
                     {d}
@@ -753,7 +754,7 @@ export default function CalendarPage() {
               </div>
 
               {/* 35 or 42 Day Grid Cells */}
-              <div className="flex-1 grid grid-cols-7 grid-rows-5 sm:grid-rows-6 gap-1 bg-[#1a1c26]/40 rounded-xl p-1 border border-[#262836]">
+              <div className="flex-1 grid grid-cols-7 grid-rows-5 sm:grid-rows-6 gap-1 bg-muted/40 rounded-xl p-1 border border-border">
                 {calendarDays.map(({ date, isCurrentMonth }) => {
                   const cellKey = toDateKey(date);
                   const dayTasks = tasksByDate.get(cellKey) || [];
@@ -768,14 +769,14 @@ export default function CalendarPage() {
                       key={cellKey}
                       onClick={() => setSelectedDate(date)}
                       className={`group relative flex flex-col min-h-[95px] p-1.5 rounded-lg border transition-all cursor-pointer ${isSelected
-                          ? "bg-[#252837] border-indigo-500 shadow-lg ring-1 ring-indigo-500/50"
+                          ? "bg-indigo-500/10 border-indigo-500 shadow-lg ring-1 ring-indigo-500/50"
                           : isToday
-                            ? "bg-[#1c1e2a] border-sky-500/50 shadow-xs"
+                            ? "bg-sky-500/10 border-sky-500/50 shadow-xs"
                             : holiday
-                              ? "bg-[#1f1a24] border-rose-900/30 hover:border-rose-700/60"
+                              ? "bg-rose-500/5 border-rose-900/30 hover:border-rose-700/60"
                               : isCurrentMonth
-                                ? "bg-[#181a24] border-[#222433] hover:border-zinc-700/80 hover:bg-[#1f2230]"
-                                : "bg-[#14151e]/60 border-transparent opacity-40 hover:opacity-75"
+                                ? "bg-card border-border hover:border-border hover:bg-accent/50"
+                                : "bg-muted/60 border-transparent opacity-40 hover:opacity-75"
                         }`}
                     >
                       {/* Cell Header: Date Number, Thai Flag / Holiday Indicator & Add Button */}
@@ -789,15 +790,15 @@ export default function CalendarPage() {
                                   : holiday
                                     ? "bg-rose-600 text-white font-bold"
                                     : isCurrentMonth
-                                      ? "text-zinc-200"
-                                      : "text-zinc-500"
+                                      ? "text-foreground"
+                                      : "text-muted-foreground"
                               }`}
                           >
                             {date.getDate()}
                           </span>
 
                           {dayTasks.length + dayAppointments.length + dayTodos.length > 0 && (
-                            <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800/80 rounded-full px-1.5 py-0.2">
+                            <span className="text-[10px] font-bold text-muted-foreground bg-accent/80 rounded-full px-1.5 py-0.2">
                               {dayTasks.length + dayAppointments.length + dayTodos.length}
                             </span>
                           )}
@@ -811,7 +812,7 @@ export default function CalendarPage() {
                             handleAddNewForDate(date);
                           }}
                           title={`Add task for ${date.toLocaleDateString()}`}
-                          className="opacity-0 group-hover:opacity-100 flex h-4 w-4 items-center justify-center rounded bg-zinc-700 hover:bg-indigo-600 text-zinc-300 hover:text-white transition-all shrink-0"
+                          className="opacity-0 group-hover:opacity-100 flex h-4 w-4 items-center justify-center rounded bg-accent hover:bg-indigo-600 text-muted-foreground hover:text-accent-foreground transition-all shrink-0"
                         >
                           <Plus className="h-3 w-3" />
                         </button>
@@ -845,10 +846,10 @@ export default function CalendarPage() {
                               }}
                               title={`${task.title} (${statusCfg.label}) - ${boardInfo.name}`}
                               className={`group/chip flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] truncate border transition-all ${isTaskDone
-                                  ? "bg-emerald-950/20 border-emerald-800/30 text-zinc-400 line-through"
+                                  ? "bg-emerald-950/20 border-emerald-800/30 text-muted-foreground line-through"
                                   : overdue
                                     ? "bg-red-950/30 border-red-800/40 text-red-200 hover:border-red-500"
-                                    : "bg-[#222533] border-[#2f3346] text-zinc-200 hover:border-indigo-500/60 hover:bg-[#2b2f42]"
+                                    : "bg-muted border-border text-foreground hover:border-indigo-500/60 hover:bg-accent"
                                 }`}
                             >
                               {/* Board color vertical stripe */}
@@ -911,7 +912,7 @@ export default function CalendarPage() {
                               }}
                               title={`${todo.title} (Personal To-Do)`}
                               className={`group/chip flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] truncate border border-dashed transition-all ${todo.isCompleted
-                                  ? "bg-violet-950/10 border-violet-800/30 text-zinc-500 line-through"
+                                  ? "bg-violet-950/10 border-violet-800/30 text-muted-foreground line-through"
                                   : "bg-violet-950/20 border-violet-700/40 text-violet-200 hover:border-violet-500"
                                 }`}
                             >
@@ -937,19 +938,19 @@ export default function CalendarPage() {
           ) : (
             /* ─── Agenda List View ────────────────────────────────────── */
             <div className="p-4 sm:p-6 max-w-4xl mx-auto w-full space-y-4">
-              <div className="flex items-center justify-between pb-2 border-b border-[#262836]">
-                <h2 className="text-sm font-bold text-white uppercase tracking-wider">
+              <div className="flex items-center justify-between pb-2 border-b border-border">
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">
                   Monthly Agenda & Deadlines ({scheduledTasks.length} tasks)
                 </h2>
               </div>
 
               {scheduledTasks.length === 0 ? (
-                <div className="py-16 text-center rounded-2xl border border-dashed border-[#2d3142] bg-[#181922] space-y-2">
-                  <CalendarIcon className="h-8 w-8 text-zinc-500 mx-auto" />
-                  <p className="text-sm font-semibold text-zinc-300">
+                <div className="py-16 text-center rounded-2xl border border-dashed border-border bg-card space-y-2">
+                  <CalendarIcon className="h-8 w-8 text-muted-foreground mx-auto" />
+                  <p className="text-sm font-semibold text-muted-foreground">
                     No scheduled tasks found
                   </p>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-muted-foreground">
                     Try changing your filter settings or create a new task.
                   </p>
                 </div>
@@ -964,6 +965,7 @@ export default function CalendarPage() {
                     .map((task) => {
                       const statusCfg = getStatusCfg(task.status);
                       const priorityCfg = getPriorityCfg(task.priority);
+                      const PriorityIcon = PRIORITY_ICON[task.priority as TaskPriority] || PRIORITY_ICON.none;
                       const board = boards.find((b) => b.id === task.boardId);
                       const parsedDue = parseSafeDate(task.dueDate);
                       const overdue = isOverdue(parsedDue, task.status);
@@ -974,7 +976,7 @@ export default function CalendarPage() {
                       return (
                         <div
                           key={task.id}
-                          className="flex items-center gap-3 p-3 rounded-xl border border-[#262836] bg-[#181922] hover:border-indigo-500/40 hover:bg-[#1d1f2b] transition-all group"
+                          className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card hover:border-indigo-500/40 hover:bg-accent transition-all group"
                         >
                           <button
                             type="button"
@@ -984,7 +986,7 @@ export default function CalendarPage() {
                                 isTaskDone ? "todo" : "done"
                               )
                             }
-                            className="text-zinc-500 hover:text-emerald-400 transition-colors shrink-0"
+                            className="text-muted-foreground hover:text-emerald-400 transition-colors shrink-0"
                           >
                             {isTaskDone ? (
                               <CheckCircle2 className="h-5 w-5 text-emerald-400" />
@@ -999,13 +1001,13 @@ export default function CalendarPage() {
                           >
                             <p
                               className={`text-xs sm:text-sm font-semibold truncate ${isTaskDone
-                                  ? "line-through text-zinc-500"
-                                  : "text-zinc-200 group-hover:text-white"
+                                  ? "line-through text-muted-foreground"
+                                  : "text-foreground group-hover:text-accent-foreground"
                                 }`}
                             >
                               {task.title}
                             </p>
-                            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-zinc-400">
+                            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground">
                               <span className="flex items-center gap-1">
                                 <span className={`h-1.5 w-1.5 rounded-full ${boardInfo.colorClass}`} />
                                 <span className="truncate">{board?.name || "Board"}</span>
@@ -1017,7 +1019,7 @@ export default function CalendarPage() {
                               )}
                               {task.category && (
                                 <>
-                                  <span className="text-zinc-600">·</span>
+                                  <span className="text-muted-foreground">·</span>
                                   <span>{task.category}</span>
                                 </>
                               )}
@@ -1031,8 +1033,9 @@ export default function CalendarPage() {
                           </span>
 
                           <span
-                            className={`text-[10px] font-bold uppercase hidden md:block ${priorityCfg.color}`}
+                            className={`hidden md:inline-flex items-center gap-1 text-[10px] font-bold uppercase ${priorityCfg.iconColor}`}
                           >
+                            <PriorityIcon className="h-3 w-3" />
                             {task.priority}
                           </span>
 
@@ -1041,7 +1044,7 @@ export default function CalendarPage() {
                               <span
                                 className={`text-xs font-medium tabular-nums ${overdue
                                     ? "text-red-400 font-bold"
-                                    : "text-zinc-400"
+                                    : "text-muted-foreground"
                                   }`}
                               >
                                 {overdue ? "⚠ " : ""}
@@ -1060,9 +1063,9 @@ export default function CalendarPage() {
 
         {/* ─── Right Schedule Side Panel ───────────────────────────────────── */}
         {showSidePanel && (
-          <div className="w-80 sm:w-96 border-l border-[#262836] bg-[#181922] flex flex-col shrink-0 animate-in slide-in-from-right duration-200">
+          <div className="w-80 sm:w-96 border-l border-border bg-card flex flex-col shrink-0 animate-in slide-in-from-right duration-200">
             {/* Side Panel Header */}
-            <div className="p-4 border-b border-[#262836] space-y-2 bg-[#161720]">
+            <div className="p-4 border-b border-border space-y-2 bg-muted">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1">
                   <CalendarDays className="h-3.5 w-3.5" />
@@ -1071,14 +1074,14 @@ export default function CalendarPage() {
                 <button
                   type="button"
                   onClick={() => setShowSidePanel(false)}
-                  className="text-zinc-500 hover:text-white p-1 rounded-md hover:bg-zinc-800"
+                  className="text-muted-foreground hover:text-accent-foreground p-1 rounded-md hover:bg-accent"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
 
               <div>
-                <h3 className="text-base font-bold text-white tracking-tight">
+                <h3 className="text-base font-bold text-foreground tracking-tight">
                   {selectedDate.toLocaleDateString("en-US", {
                     weekday: "short",
                     month: "short",
@@ -1086,7 +1089,7 @@ export default function CalendarPage() {
                     year: "numeric",
                   })}
                 </h3>
-                <p className="text-xs text-zinc-400 mt-0.5">
+                <p className="text-xs text-muted-foreground mt-0.5">
                   {selectedDateTasks.length} {selectedDateTasks.length === 1 ? "task" : "tasks"} · {selectedDateAppointments.length} {selectedDateAppointments.length === 1 ? "appointment" : "appointments"} · {selectedDateTodos.length} personal {selectedDateTodos.length === 1 ? "to-do" : "to-dos"}
                 </p>
               </div>
@@ -1113,15 +1116,15 @@ export default function CalendarPage() {
               selectedDateAppointments.length === 0 &&
               selectedDateTodos.length === 0 &&
               !isAddingTodo ? (
-                <div className="py-12 text-center rounded-xl border border-dashed border-[#2e3144] bg-[#14151c]/60 p-4 space-y-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800/80 text-zinc-500 mx-auto">
+                <div className="py-12 text-center rounded-xl border border-dashed border-border bg-background/60 p-4 space-y-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/80 text-muted-foreground mx-auto">
                     <StickyNote className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-zinc-300">
+                    <p className="text-xs font-semibold text-muted-foreground">
                       Nothing scheduled for this day
                     </p>
-                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
                       Add a personal to-do — private to you, with an optional reminder.
                     </p>
                   </div>
@@ -1139,6 +1142,7 @@ export default function CalendarPage() {
                   {selectedDateTasks.map((task) => {
                     const statusCfg = getStatusCfg(task.status);
                     const priorityCfg = getPriorityCfg(task.priority);
+                    const PriorityIcon = PRIORITY_ICON[task.priority as TaskPriority] || PRIORITY_ICON.none;
                     const isTaskDone = task.status === "done" || task.status === "approved";
                     const board = boards.find((b) => b.id === task.boardId);
                     const parsedDue = parseSafeDate(task.dueDate);
@@ -1153,11 +1157,11 @@ export default function CalendarPage() {
                         key={task.id}
                         onClick={() => router.push(`/my-work?taskId=${task.id}`)}
                         title="Open in My Work"
-                        className="p-3 rounded-xl border border-[#292c3d] bg-[#1c1e2a] hover:border-indigo-500/50 hover:bg-[#212433] transition-all space-y-2 group cursor-pointer"
+                        className="p-3 rounded-xl border border-border bg-card hover:border-indigo-500/50 hover:bg-accent transition-all space-y-2 group cursor-pointer"
                       >
                         <div className="flex items-start gap-2.5">
                           {/* Status indicator (read-only — edit from My Work) */}
-                          <span className="mt-0.5 text-zinc-500 shrink-0">
+                          <span className="mt-0.5 text-muted-foreground shrink-0">
                             {isTaskDone ? (
                               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
                             ) : (
@@ -1169,14 +1173,14 @@ export default function CalendarPage() {
                           <div className="min-w-0 flex-1">
                             <h4
                               className={`text-xs font-semibold leading-snug ${isTaskDone
-                                  ? "line-through text-zinc-500"
-                                  : "text-zinc-100 group-hover:text-white"
+                                  ? "line-through text-muted-foreground"
+                                  : "text-foreground group-hover:text-accent-foreground"
                                 }`}
                             >
                               {task.title}
                             </h4>
                             {task.description && (
-                              <p className="text-[11px] text-zinc-400 line-clamp-2 mt-1">
+                              <p className="text-[11px] text-muted-foreground line-clamp-2 mt-1">
                                 {task.description}
                               </p>
                             )}
@@ -1184,16 +1188,16 @@ export default function CalendarPage() {
                         </div>
 
                         {/* Assignee & Due Date (read-only) */}
-                        <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-1 border-t border-[#292c3d]/40">
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-border/40">
                           <div className="flex items-center gap-1.5 truncate">
                             {taskAssignees.length > 0 ? (
-                              <span className="flex items-center gap-1 text-zinc-300 min-w-0">
+                              <span className="flex items-center gap-1 text-muted-foreground min-w-0">
                                 <span className="flex items-center -space-x-1 shrink-0">
                                   {taskAssignees.slice(0, 3).map((a) => (
                                     <span
                                       key={a.id}
                                       title={a.name}
-                                      className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white ring-1 ring-[#1c1e2a] ${a.avatarColor || "bg-indigo-600"}`}
+                                      className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white ring-1 ring-card ${a.avatarColor || "bg-indigo-600"}`}
                                     >
                                       {a.avatarInitials}
                                     </span>
@@ -1206,13 +1210,13 @@ export default function CalendarPage() {
                                 </span>
                               </span>
                             ) : (
-                              <span className="text-zinc-500 italic">Unassigned</span>
+                              <span className="text-muted-foreground italic">Unassigned</span>
                             )}
                           </div>
 
                           {parsedDue && (
                             <span
-                              className={`text-[10px] font-medium tabular-nums ${overdue ? "text-red-400 font-bold" : "text-zinc-400"
+                              className={`text-[10px] font-medium tabular-nums ${overdue ? "text-red-400 font-bold" : "text-muted-foreground"
                                 }`}
                             >
                               {overdue ? "⚠ " : ""}
@@ -1222,9 +1226,9 @@ export default function CalendarPage() {
                         </div>
 
                         {/* Metadata Footer */}
-                        <div className="flex items-center justify-between pt-1 border-t border-[#292c3d]/60 text-[10px]">
+                        <div className="flex items-center justify-between pt-1 border-t border-border/60 text-[10px]">
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="flex items-center gap-1 rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300 font-medium truncate">
+                            <span className="flex items-center gap-1 rounded bg-accent px-1.5 py-0.5 text-muted-foreground font-medium truncate">
                               <span className={`h-1.5 w-1.5 rounded-full ${boardInfo.colorClass}`} />
                               <span className="truncate">{boardInfo.name}</span>
                             </span>
@@ -1232,8 +1236,9 @@ export default function CalendarPage() {
 
                           <div className="flex items-center gap-1.5 shrink-0">
                             <span
-                              className={`rounded px-1.5 py-0.5 font-bold uppercase ${priorityCfg.color}`}
+                              className={`flex items-center gap-1 rounded px-1.5 py-0.5 font-bold uppercase ${priorityCfg.iconColor}`}
                             >
+                              <PriorityIcon className="h-3 w-3" />
                               {task.priority}
                             </span>
                             <span
@@ -1249,7 +1254,7 @@ export default function CalendarPage() {
 
                   {/* ─── Workspace Appointments Section ───────────────────── */}
                   {selectedDateAppointments.length > 0 && (
-                    <div className="pt-3 mt-1 border-t border-[#262836] space-y-2">
+                    <div className="pt-3 mt-1 border-t border-border space-y-2">
                       <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400">
                         <CalendarCheck2 className="h-3.5 w-3.5" />
                         <span>Workspace Appointments</span>
@@ -1267,17 +1272,17 @@ export default function CalendarPage() {
                           >
                             <CalendarCheck2 className="h-4 w-4 mt-0.5 text-emerald-400 shrink-0" />
                             <div className="min-w-0 flex-1">
-                              <p className="text-xs font-semibold leading-snug text-zinc-100">
+                              <p className="text-xs font-semibold leading-snug text-foreground">
                                 {appt.title}
                               </p>
-                              <span className="flex items-center gap-1 text-[10px] text-zinc-400 mt-0.5">
+                              <span className="flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5">
                                 <Clock className="h-3 w-3" />
                                 {appt.startAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                                 {apptWorkspace ? ` · ${apptWorkspace.name}` : ""}
                                 {creator ? ` · by ${creator.name}` : ""}
                               </span>
                               {appt.notes && (
-                                <p className="text-[11px] text-zinc-400 line-clamp-2 mt-1">
+                                <p className="text-[11px] text-muted-foreground line-clamp-2 mt-1">
                                   {appt.notes}
                                 </p>
                               )}
@@ -1289,7 +1294,7 @@ export default function CalendarPage() {
                   )}
 
                   {/* ─── Personal To-Do Section ───────────────────────────── */}
-                  <div className="pt-3 mt-1 border-t border-[#262836] space-y-2">
+                  <div className="pt-3 mt-1 border-t border-border space-y-2">
                     <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-violet-400">
                       <StickyNote className="h-3.5 w-3.5" />
                       <span>Personal To-Do</span>
@@ -1303,7 +1308,7 @@ export default function CalendarPage() {
                         <button
                           type="button"
                           onClick={() => toggleTodoComplete(todo.id)}
-                          className="mt-0.5 text-zinc-500 hover:text-violet-400 transition-colors shrink-0"
+                          className="mt-0.5 text-muted-foreground hover:text-violet-400 transition-colors shrink-0"
                         >
                           {todo.isCompleted ? (
                             <CheckCircle2 className="h-4 w-4 text-violet-400" />
@@ -1315,14 +1320,14 @@ export default function CalendarPage() {
                         <div className="min-w-0 flex-1">
                           <p
                             className={`text-xs font-semibold leading-snug ${todo.isCompleted
-                                ? "line-through text-zinc-500"
-                                : "text-zinc-100"
+                                ? "line-through text-muted-foreground"
+                                : "text-foreground"
                               }`}
                           >
                             {todo.title}
                           </p>
                           {todo.dueAt && (
-                            <span className="flex items-center gap-1 text-[10px] text-zinc-400 mt-0.5">
+                            <span className="flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5">
                               <Bell className="h-3 w-3" />
                               {new Date(todo.dueAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                               {" · reminds "}
@@ -1336,7 +1341,7 @@ export default function CalendarPage() {
                           type="button"
                           onClick={() => deletePersonalTodo(todo.id)}
                           title="Delete to-do"
-                          className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 transition-all shrink-0"
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-all shrink-0"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -1344,7 +1349,7 @@ export default function CalendarPage() {
                     ))}
 
                     {isAddingTodo ? (
-                      <div className="p-2.5 rounded-xl border border-violet-700/40 bg-[#14151e] space-y-2">
+                      <div className="p-2.5 rounded-xl border border-violet-700/40 bg-card space-y-2">
                         <input
                           type="text"
                           autoFocus
@@ -1355,23 +1360,23 @@ export default function CalendarPage() {
                             if (e.key === "Escape") setIsAddingTodo(false);
                           }}
                           placeholder="What do you need to do?"
-                          className="w-full rounded-lg border border-[#2e3144] bg-[#1c1e28] px-2.5 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-violet-500"
+                          className="w-full rounded-lg border border-border bg-muted px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-violet-500"
                         />
                         <div className="flex items-center gap-2">
                           <input
                             type="time"
                             value={newTodoTime}
                             onChange={(e) => setNewTodoTime(e.target.value)}
-                            className="rounded-lg border border-[#2e3144] bg-[#1c1e28] px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-violet-500"
+                            className="rounded-lg border border-border bg-muted px-2 py-1 text-[11px] text-foreground focus:outline-none focus:border-violet-500"
                           />
-                          <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+                          <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
                             <Bell className="h-3 w-3" />
                             <input
                               type="number"
                               min={0}
                               value={newTodoReminderMinutes}
                               onChange={(e) => setNewTodoReminderMinutes(parseInt(e.target.value, 10) || 0)}
-                              className="w-12 rounded-lg border border-[#2e3144] bg-[#1c1e28] px-1.5 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-violet-500"
+                              className="w-12 rounded-lg border border-border bg-muted px-1.5 py-1 text-[11px] text-foreground focus:outline-none focus:border-violet-500"
                             />
                             <span>min before</span>
                           </div>
@@ -1380,7 +1385,7 @@ export default function CalendarPage() {
                           <button
                             type="button"
                             onClick={() => setIsAddingTodo(false)}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-medium text-zinc-400 hover:text-white transition-colors"
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-accent-foreground transition-colors"
                           >
                             Cancel
                           </button>
@@ -1398,7 +1403,7 @@ export default function CalendarPage() {
                       <button
                         type="button"
                         onClick={handleOpenAddTodo}
-                        className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#2e3144] py-2 text-xs font-semibold text-zinc-400 hover:text-white hover:border-violet-500 hover:bg-[#1f212c] transition-colors"
+                        className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2 text-xs font-semibold text-muted-foreground hover:text-accent-foreground hover:border-violet-500 hover:bg-muted transition-colors"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         <span>Add To-Do for this Day</span>

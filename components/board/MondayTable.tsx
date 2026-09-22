@@ -577,7 +577,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                  where the "Status" column would be. */
               <div
                 onPointerDown={(e) => handleGroupHeaderPointerDown(e, group)}
-                className="flex items-stretch rounded-xl border border-zinc-800/90 bg-[#1c1c1f] shadow-sm overflow-hidden cursor-pointer"
+                className="flex items-stretch rounded-xl border border-border/90 bg-card shadow-sm overflow-hidden cursor-pointer"
               >
                 <div
                   className="w-1.5 shrink-0"
@@ -595,7 +595,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                     setGroupMenuId(groupMenuId === group.id ? null : group.id);
                   }}
                   title="Click for group options, or press and drag to reorder"
-                  className={`flex items-center justify-center h-6 w-6 my-auto ml-2 shrink-0 rounded text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer ${
+                  className={`flex items-center justify-center h-6 w-6 my-auto ml-2 shrink-0 rounded text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors cursor-pointer ${
                     canManage ? "" : "invisible"
                   }`}
                 >
@@ -607,7 +607,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                   onClose={() => setGroupMenuId(null)}
                   anchorRef={{ current: groupMenuButtonRefs.current[group.id] }}
                   align="left"
-                  className="w-48 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-left"
+                  className="w-48 rounded-xl border border-border bg-popover p-1.5 shadow-2xl text-left"
                 >
                   <button
                     type="button"
@@ -621,12 +621,12 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                         priority: "medium",
                       }).catch((err) => console.error("Failed to create item:", err));
                     }}
-                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
                   >
                     <Plus className="h-3.5 w-3.5 shrink-0" />
                     <span>Add item</span>
                   </button>
-                  <div className="my-1 border-t border-zinc-800" />
+                  <div className="my-1 border-t border-border" />
                   <button
                     type="button"
                     onClick={() => {
@@ -659,7 +659,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                     >
                       {group.name}
                     </div>
-                    <div className="text-[11px] text-zinc-500">
+                    <div className="text-[11px] text-muted-foreground">
                       {groupTasks.length} {groupTasks.length === 1 ? "Item" : "Items"}
                     </div>
                   </div>
@@ -678,7 +678,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                       }
                     }}
                     title="Delete group"
-                    className="p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                    className="p-1 rounded text-muted-foreground hover:text-red-400 hover:bg-accent transition-colors"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -705,7 +705,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                     setGroupMenuId(groupMenuId === group.id ? null : group.id)
                   }
                   title="Click for group options, or press and drag to reorder"
-                  className={`flex items-center justify-center h-6 w-6 rounded text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors shrink-0 cursor-pointer ${
+                  className={`flex items-center justify-center h-6 w-6 rounded text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors shrink-0 cursor-pointer ${
                     canManage ? "" : "invisible"
                   }`}
                 >
@@ -717,7 +717,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                   onClose={() => setGroupMenuId(null)}
                   anchorRef={{ current: groupMenuButtonRefs.current[group.id] }}
                   align="left"
-                  className="w-48 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-left"
+                  className="w-48 rounded-xl border border-border bg-popover p-1.5 shadow-2xl text-left"
                 >
                   <button
                     type="button"
@@ -731,12 +731,12 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                         priority: "medium",
                       }).catch((err) => console.error("Failed to create item:", err));
                     }}
-                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
                   >
                     <Plus className="h-3.5 w-3.5 shrink-0" />
                     <span>Add item</span>
                   </button>
-                  <div className="my-1 border-t border-zinc-800" />
+                  <div className="my-1 border-t border-border" />
                   <button
                     type="button"
                     onClick={() => {
@@ -800,7 +800,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                       onClose={() => setColorPickerGroupId(null)}
                       anchorRef={{ current: colorButtonRefs.current[group.id] }}
                       align="left"
-                      className="w-48 rounded-xl border border-zinc-700 bg-[#1c1e28] p-2 shadow-2xl"
+                      className="w-48 rounded-xl border border-border bg-popover p-2 shadow-2xl"
                     >
                       <div
                         className="grid grid-cols-5 gap-1.5 p-1"
@@ -840,7 +840,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                         if (e.key === "Enter") saveGroupName(group);
                         if (e.key === "Escape") setEditingGroupId(null);
                       }}
-                      className="text-sm font-semibold bg-zinc-900 border rounded px-1.5 py-0.5 min-w-0 focus:outline-none"
+                      className="text-sm font-semibold bg-muted border rounded px-1.5 py-0.5 min-w-0 focus:outline-none"
                       style={{ color: group.color || "#0073ea", borderColor: group.color || "#0073ea" }}
                     />
                   </>
@@ -857,11 +857,11 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                     >
                       {group.name}
                     </span>
-                    <Pencil className="h-3 w-3 text-zinc-500 opacity-0 group-hover/rename:opacity-100 transition-opacity shrink-0" />
+                    <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover/rename:opacity-100 transition-opacity shrink-0" />
                   </button>
                 )}
 
-                <span className="text-[11px] text-zinc-500 font-normal shrink-0">
+                <span className="text-[11px] text-muted-foreground font-normal shrink-0">
                   {groupTasks.length} {groupTasks.length === 1 ? "item" : "items"}
                 </span>
               </div>
@@ -876,7 +876,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                       }
                     }}
                     title="Delete group"
-                    className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors text-xs"
+                    className="p-1 rounded text-muted-foreground hover:text-red-400 hover:bg-accent transition-colors text-xs"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -892,13 +892,13 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                 className={`ml-7 rounded-xl border shadow-sm overflow-x-auto transition-colors ${
                   dragOverGroupId === group.id
                     ? "border-[#0073ea] bg-[#0073ea]/5"
-                    : "border-zinc-800/90 bg-[#1c1c1f]"
+                    : "border-border/90 bg-card"
                 }`}
               >
                 <table className="w-full text-left text-xs border-collapse min-w-[750px]">
                   {/* Table Column Headers */}
                   <thead>
-                    <tr className="border-b border-zinc-800 bg-[#202023] text-zinc-400 font-normal text-[11px]">
+                    <tr className="border-b border-border bg-muted text-muted-foreground font-normal text-[11px]">
                       {/* Left border indicator column */}
                       <th
                         className="w-1.5 p-0"
@@ -915,29 +915,29 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                               )
                             }
                             onChange={() => toggleSelectAll(groupTasks)}
-                            className="rounded border-zinc-700 bg-zinc-900 cursor-pointer"
+                            className="rounded border-border bg-muted cursor-pointer"
                           />
                         )}
                       </th>
-                      <th className="px-3 py-2 text-zinc-300 font-medium min-w-[260px] border-l border-zinc-800">
+                      <th className="px-3 py-2 text-muted-foreground font-medium min-w-[260px] border-l border-border">
                         Item
                       </th>
                       {showPersonColumn && (
-                        <th className="px-3 py-2 w-32 text-center text-zinc-300 font-medium border-l border-zinc-800">
+                        <th className="px-3 py-2 w-32 text-center text-muted-foreground font-medium border-l border-border">
                           Person
                         </th>
                       )}
                       {showStatusColumn && (
-                        <th className="px-3 py-2 w-40 text-center text-zinc-300 font-medium border-l border-zinc-800">
+                        <th className="px-3 py-2 w-40 text-center text-muted-foreground font-medium border-l border-border">
                           Status
                         </th>
                       )}
                       {showDateColumn && (
-                        <th className="px-3 py-2 w-36 text-center text-zinc-300 font-medium border-l border-zinc-800">
+                        <th className="px-3 py-2 w-36 text-center text-muted-foreground font-medium border-l border-border">
                           Date
                         </th>
                       )}
-                      <th className="w-10 px-2 py-2 text-center text-zinc-500 border-l border-zinc-800">
+                      <th className="w-10 px-2 py-2 text-center text-muted-foreground border-l border-border">
                         <Plus className="h-3.5 w-3.5 mx-auto" />
                       </th>
                     </tr>
@@ -966,16 +966,26 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                             rowRefs.current[task.id] = el;
                           }}
                           onPointerDown={(e) => handleRowPointerDown(e, task)}
+                          onClick={(e) => {
+                            const target = e.target as HTMLElement;
+                            if (
+                              target.closest(
+                                "button, input, select, textarea, a, [data-task-title]"
+                              )
+                            )
+                              return;
+                            openTaskModal(task.id);
+                          }}
                           onMouseEnter={() => showRowHandle(task.id)}
                           onMouseLeave={scheduleHideRowHandle}
                           className={`group transition-colors cursor-pointer ${
                             draggingTaskId === task.id
                               ? "opacity-40"
                               : isNewlyCreated
-                              ? "bg-[#363b58]"
+                              ? "bg-primary/10"
                               : isSelected
-                              ? "bg-[#2d3144]"
-                              : "hover:bg-[#202230]"
+                              ? "bg-accent"
+                              : "hover:bg-accent/50"
                           }`}
                         >
                           {/* Left colored border */}
@@ -991,13 +1001,13 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                                 type="checkbox"
                                 checked={isSelected}
                                 onChange={() => toggleSelectTask(task.id)}
-                                className="rounded border-zinc-700 bg-zinc-900 cursor-pointer"
+                                className="rounded border-border bg-muted cursor-pointer"
                               />
                             )}
                           </td>
 
                           {/* Item Title + Comment Bubble */}
-                          <td className="px-3 py-2 border-l border-zinc-800/60">
+                          <td className="px-3 py-2 border-l border-border/60">
                             <div className="flex items-center justify-between gap-2">
                               {editingTaskId === task.id ? (
                                 <input
@@ -1011,13 +1021,14 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                                     if (e.key === "Enter") saveTaskTitle(task);
                                     if (e.key === "Escape") cancelEditingTaskTitle(task);
                                   }}
-                                  className="flex-1 min-w-0 rounded border border-zinc-600 bg-zinc-900/60 px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:border-[#0073ea]"
+                                  className="flex-1 min-w-0 rounded border border-border bg-muted/60 px-2 py-1 text-xs text-foreground focus:outline-none focus:border-[#0073ea]"
                                 />
                               ) : (
                                 <span
+                                  data-task-title
                                   onClick={() => startEditingTaskTitle(task)}
                                   title="Click to rename"
-                                  className="font-normal text-zinc-100 hover:text-indigo-400 transition-colors cursor-pointer line-clamp-1 flex-1 text-xs"
+                                  className="font-normal text-foreground hover:text-indigo-400 transition-colors cursor-pointer line-clamp-1 flex-1 text-xs"
                                 >
                                   {task.title}
                                 </span>
@@ -1028,7 +1039,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                                 type="button"
                                 onClick={() => openTaskModal(task.id, "activity")}
                                 title="Open updates"
-                                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors shrink-0"
+                                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-accent-foreground hover:bg-accent transition-colors shrink-0"
                               >
                                 <MessageSquare className="h-3 w-3" />
                                 <span>
@@ -1040,7 +1051,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
 
                           {/* Person / Owner Avatar */}
                           {showPersonColumn && (
-                            <td className="px-3 py-1.5 text-center border-l border-zinc-800/60">
+                            <td className="px-3 py-1.5 text-center border-l border-border/60">
                               <div className="flex justify-center">
                                 <AssigneeSelect
                                   currentAssigneeIds={task.assigneeIds}
@@ -1055,7 +1066,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
 
                           {/* Status Block */}
                           {showStatusColumn && (
-                            <td className="px-2 py-1 text-center border-l border-zinc-800/60">
+                            <td className="px-2 py-1 text-center border-l border-border/60">
                               <StatusDropdown
                                 disabled={!canDo("status", boardId, task)}
                                 currentStatus={task.status}
@@ -1068,7 +1079,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
 
                           {/* Date */}
                           {showDateColumn && (
-                            <td className="px-3 py-1.5 border-l border-zinc-800/60">
+                            <td className="px-3 py-1.5 border-l border-border/60">
                               <DatePicker
                                 disabled={!canManage}
                                 currentDate={task.dueDate}
@@ -1080,24 +1091,24 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                           )}
 
                           {/* Add button placeholder */}
-                          <td className="border-l border-zinc-800/60" />
+                          <td className="border-l border-border/60" />
                         </tr>
                       );
                     })}
 
                     {/* Inline "+ Add item" Row */}
                     {canManage && (
-<tr className="bg-transparent hover:bg-zinc-800/30 transition-colors">
+<tr className="bg-transparent hover:bg-accent/30 transition-colors">
                       <td
                         className="w-1.5 p-0"
                         style={{ backgroundColor: group.color || "#0073ea" }}
                       />
-                      <td className="px-2.5 py-2 text-center text-zinc-500">
+                      <td className="px-2.5 py-2 text-center text-muted-foreground">
                         <Plus className="h-3.5 w-3.5 mx-auto" />
                       </td>
                       <td
                         colSpan={2 + visibleOptionalColumnCount}
-                        className="px-3 py-1.5 border-l border-zinc-800/60"
+                        className="px-3 py-1.5 border-l border-border/60"
                       >
                         <form
                           onSubmit={(e) => handleAddRow(group.id, e)}
@@ -1113,7 +1124,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                               })
                             }
                             placeholder="+ Add item"
-                            className="w-full bg-transparent px-1 py-1 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
+                            className="w-full bg-transparent px-1 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
                           />
                           {newRowTitles[group.id]?.trim() && (
                             <button
@@ -1131,7 +1142,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
 
                   {/* Group Summary Footer Row with Segmented Bar */}
                   <tfoot>
-                    <tr className="border-t border-zinc-800/80 bg-[#1c1c1f]">
+                    <tr className="border-t border-border/80 bg-card">
                       <td
                         className="w-1.5 p-0"
                         style={{ backgroundColor: group.color || "#0073ea" }}
@@ -1164,8 +1175,8 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
       {selectedTaskIds.length > 0 &&
         createPortal(
           <div className="fixed inset-x-0 bottom-5 z-50 flex justify-center px-4 pointer-events-none animate-in slide-in-from-bottom-2 fade-in duration-200">
-            <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-zinc-700 bg-[#1c1e28] pl-4 pr-2 py-2 shadow-2xl shadow-black/40">
-              <span className="flex items-center gap-2 pr-3 mr-1 border-r border-zinc-700 text-xs font-semibold text-white whitespace-nowrap">
+            <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-border bg-popover pl-4 pr-2 py-2 shadow-2xl shadow-black/40">
+              <span className="flex items-center gap-2 pr-3 mr-1 border-r border-border text-xs font-semibold text-foreground whitespace-nowrap">
                 <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0073ea] px-1.5 text-[11px] font-bold text-white">
                   {selectedTaskIds.length}
                 </span>
@@ -1178,7 +1189,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                 onClick={() => setIsBulkMoveOpen((v) => !v)}
                 disabled={boardGroups.length < 2}
                 title={boardGroups.length < 2 ? "No other group to move to" : "Move to another group"}
-                className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
               >
                 <ArrowRightLeft className="h-3.5 w-3.5" />
                 <span>Move to</span>
@@ -1189,9 +1200,9 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                 onClose={() => setIsBulkMoveOpen(false)}
                 anchorRef={bulkMoveButtonRef}
                 align="left"
-                className="w-52 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-left"
+                className="w-52 rounded-xl border border-border bg-popover p-1.5 shadow-2xl text-left"
               >
-                <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Move {selectedTaskIds.length} item{selectedTaskIds.length === 1 ? "" : "s"} to
                 </div>
                 {boardGroups.map((g) => (
@@ -1199,7 +1210,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                     key={g.id}
                     type="button"
                     onClick={() => handleBulkMove(g.id)}
-                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
                   >
                     <span
                       className="h-2.5 w-2.5 rounded-full shrink-0"
@@ -1219,13 +1230,13 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                 <span>Delete</span>
               </button>
 
-              <div className="mx-1 h-5 w-px bg-zinc-700" />
+              <div className="mx-1 h-5 w-px bg-border" />
 
               <button
                 type="button"
                 onClick={() => setSelectedTaskIds([])}
                 title="Clear selection"
-                className="flex items-center justify-center h-7 w-7 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+                className="flex items-center justify-center h-7 w-7 rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -1266,7 +1277,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                   )
                 }
                 title="Click for menu, or press and drag to move"
-                className="flex items-center justify-center h-6 w-6 rounded bg-[#1c1e28] text-zinc-400 hover:text-white hover:bg-zinc-800 shadow-md transition-colors cursor-pointer"
+                className="flex items-center justify-center h-6 w-6 rounded bg-popover text-muted-foreground hover:text-accent-foreground hover:bg-accent shadow-md transition-colors cursor-pointer"
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </button>
@@ -1276,7 +1287,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                 onClose={() => setRowMenuTaskId(null)}
                 anchorRef={{ current: rowMenuButtonRefs.current[activeTask.id] }}
                 align="left"
-                className="w-52 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-left"
+                className="w-52 rounded-xl border border-border bg-popover p-1.5 shadow-2xl text-left"
               >
                 <button
                   type="button"
@@ -1294,8 +1305,8 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
 
                 {boardGroups.length > 1 && (
                   <>
-                    <div className="my-1 border-t border-zinc-800" />
-                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500 flex items-center gap-1.5">
+                    <div className="my-1 border-t border-border" />
+                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                       <ArrowRightLeft className="h-3 w-3" />
                       <span>Move to</span>
                     </div>
@@ -1309,7 +1320,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                             setRowMenuTaskId(null);
                             moveTaskToGroup(activeTask.id, g.id);
                           }}
-                          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-left"
                         >
                           <span
                             className="h-2.5 w-2.5 rounded-full shrink-0"

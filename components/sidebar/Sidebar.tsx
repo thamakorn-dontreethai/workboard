@@ -93,7 +93,7 @@ export function Sidebar({
     "team-folder": true,
   });
 
-  const workspaceDropdownRef = useRef<HTMLDivElement>(null);
+  const workspaceButtonRef = useRef<HTMLButtonElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
 
   // Right-click or "..." on a board row in the Projects list, to rename or
@@ -204,9 +204,9 @@ export function Sidebar({
       return (
         <div
           key={b.id}
-          className={`flex items-center gap-2.5 rounded-lg py-2 text-xs bg-[#232533] ${opts.indent ? "pl-7 pr-2.5" : "px-2.5"}`}
+          className={`flex items-center gap-2.5 rounded-lg py-2 text-xs bg-sidebar-accent ${opts.indent ? "pl-7 pr-2.5" : "px-2.5"}`}
         >
-          <Table className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+          <Table className="h-3.5 w-3.5 shrink-0 text-sidebar-foreground/60" />
           <input
             autoFocus
             value={boardNameInput}
@@ -216,7 +216,7 @@ export function Sidebar({
               if (e.key === "Enter") handleRenameBoardSave(b.id);
               if (e.key === "Escape") setEditingBoardId(null);
             }}
-            className="flex-1 min-w-0 bg-transparent border-b border-indigo-500 text-white focus:outline-none"
+            className="flex-1 min-w-0 bg-transparent border-b border-indigo-500 text-sidebar-accent-foreground focus:outline-none"
           />
         </div>
       );
@@ -236,11 +236,10 @@ export function Sidebar({
           e.preventDefault();
           if (canDo("manage", b.id)) setBoardMenuId(b.id);
         }}
-        className={`group relative flex items-center justify-between rounded-lg text-xs transition-all cursor-grab active:cursor-grabbing ${
-          isActive
-            ? "bg-[#36384d] text-white font-medium shadow-xs"
-            : "text-zinc-300 hover:bg-[#232533] hover:text-white"
-        } ${draggingBoardId === b.id ? "opacity-40" : ""}`}
+        className={`group relative flex items-center justify-between rounded-lg text-xs transition-all cursor-grab active:cursor-grabbing ${isActive
+          ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium shadow-xs"
+          : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          } ${draggingBoardId === b.id ? "opacity-40" : ""}`}
       >
         <Link
           href={`/board/${b.id}`}
@@ -249,16 +248,15 @@ export function Sidebar({
           className={`flex items-center gap-2.5 min-w-0 flex-1 py-2 ${opts.indent ? "pl-7 pr-2.5" : "px-2.5"}`}
         >
           <Table
-            className={`h-3.5 w-3.5 shrink-0 transition-colors ${
-              isActive ? "text-blue-400" : "text-zinc-400 group-hover:text-zinc-200"
-            }`}
+            className={`h-3.5 w-3.5 shrink-0 transition-colors ${isActive ? "text-blue-400" : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground"
+              }`}
           />
           <span className="truncate">{b.name}</span>
         </Link>
 
         <div className="flex items-center gap-1 pr-2 shrink-0">
           {taskCount > 0 && (
-            <span className="rounded-full bg-zinc-800 text-zinc-400 group-hover:text-zinc-200 px-1.5 py-0.2 text-[10px] font-bold">
+            <span className="rounded-full bg-sidebar-accent text-sidebar-foreground/60 group-hover:text-sidebar-foreground px-1.5 py-0.2 text-[10px] font-bold">
               {taskCount}
             </span>
           )}
@@ -273,9 +271,8 @@ export function Sidebar({
               setBoardMenuId(boardMenuId === b.id ? null : b.id);
             }}
             title="Board options"
-            className={`opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:text-white hover:bg-zinc-700 transition-all shrink-0 cursor-pointer ${
-              canDo("manage", b.id) ? "" : "hidden"
-            }`}
+            className={`opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-all shrink-0 cursor-pointer ${canDo("manage", b.id) ? "" : "hidden"
+              }`}
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
@@ -286,12 +283,12 @@ export function Sidebar({
           onClose={() => setBoardMenuId(null)}
           anchorRef={{ current: boardMenuButtonRefs.current[b.id] }}
           align="right"
-          className="w-48 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-left"
+          className="w-48 rounded-xl border border-sidebar-border bg-sidebar p-1.5 shadow-2xl text-left"
         >
           <button
             type="button"
             onClick={() => handleRenameBoardStart(b.id, b.name)}
-            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left cursor-pointer"
           >
             <Pencil className="h-3.5 w-3.5 text-blue-400" />
             <span>Rename</span>
@@ -303,7 +300,7 @@ export function Sidebar({
                 setBoardMenuId(null);
                 updateBoard(b.id, { folderId: null });
               }}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left cursor-pointer"
             >
               <FolderOpen className="h-3.5 w-3.5 text-amber-400" />
               <span>Remove from folder</span>
@@ -329,7 +326,7 @@ export function Sidebar({
     if (editingFolderId === f.id) {
       return (
         <div key={f.id} className="space-y-0.5">
-          <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs bg-[#232533]">
+          <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs bg-sidebar-accent">
             <Folder className={`h-3.5 w-3.5 shrink-0 ${f.color}`} />
             <input
               autoFocus
@@ -340,7 +337,7 @@ export function Sidebar({
                 if (e.key === "Enter") handleRenameFolderSave(f.id);
                 if (e.key === "Escape") setEditingFolderId(null);
               }}
-              className="flex-1 min-w-0 bg-transparent border-b border-indigo-500 text-white focus:outline-none"
+              className="flex-1 min-w-0 bg-transparent border-b border-indigo-500 text-sidebar-accent-foreground focus:outline-none"
             />
           </div>
         </div>
@@ -368,11 +365,10 @@ export function Sidebar({
             e.preventDefault();
             handleDropOnFolder(f.id);
           }}
-          className={`group relative flex items-center justify-between rounded-lg pr-1 text-xs transition-all ${
-            isDropTarget
-              ? "bg-indigo-600/20 ring-1 ring-indigo-500"
-              : "text-zinc-300 hover:bg-[#232533] hover:text-white"
-          }`}
+          className={`group relative flex items-center justify-between rounded-lg pr-1 text-xs transition-all ${isDropTarget
+            ? "bg-indigo-600/20 ring-1 ring-indigo-500"
+            : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            }`}
         >
           <button
             type="button"
@@ -380,14 +376,14 @@ export function Sidebar({
             className="flex items-center gap-1.5 min-w-0 flex-1 px-1.5 py-2 cursor-pointer text-left"
           >
             {f.isCollapsed ? (
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-sidebar-foreground/50" />
             ) : (
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-sidebar-foreground/50" />
             )}
             <Folder className={`h-3.5 w-3.5 shrink-0 ${f.color}`} />
             <span className="truncate font-medium">{f.name}</span>
             {folderBoards.length > 0 && (
-              <span className="text-[10px] text-zinc-500 shrink-0">{folderBoards.length}</span>
+              <span className="text-[10px] text-sidebar-foreground/50 shrink-0">{folderBoards.length}</span>
             )}
           </button>
 
@@ -401,9 +397,8 @@ export function Sidebar({
               setFolderMenuId(folderMenuId === f.id ? null : f.id);
             }}
             title="Folder options"
-            className={`opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:text-white hover:bg-zinc-700 transition-all shrink-0 cursor-pointer ${
-              isWorkspaceLeader ? "" : "hidden"
-            }`}
+            className={`opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-all shrink-0 cursor-pointer ${isWorkspaceLeader ? "" : "hidden"
+              }`}
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
@@ -413,19 +408,19 @@ export function Sidebar({
             onClose={() => setFolderMenuId(null)}
             anchorRef={{ current: folderMenuButtonRefs.current[f.id] }}
             align="right"
-            className="w-48 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-left"
+            className="w-48 rounded-xl border border-sidebar-border bg-sidebar p-1.5 shadow-2xl text-left"
           >
             <button
               type="button"
               onClick={() => handleRenameFolderStart(f.id, f.name)}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left cursor-pointer"
             >
               <Pencil className="h-3.5 w-3.5 text-blue-400" />
               <span>Rename</span>
             </button>
 
             <div className="px-2.5 py-1.5">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/50 mb-1.5">
                 Color
               </div>
               <div className="flex items-center gap-1.5">
@@ -438,9 +433,8 @@ export function Sidebar({
                       updateFolder(f.id, { color: c.class });
                       setFolderMenuId(null);
                     }}
-                    className={`h-5 w-5 rounded-full flex items-center justify-center border transition-colors cursor-pointer ${
-                      f.color === c.class ? "border-white" : "border-transparent hover:border-zinc-600"
-                    }`}
+                    className={`h-5 w-5 rounded-full flex items-center justify-center border transition-colors cursor-pointer ${f.color === c.class ? "border-white" : "border-transparent hover:border-sidebar-border"
+                      }`}
                   >
                     <Folder className={`h-3.5 w-3.5 ${c.class}`} />
                   </button>
@@ -448,12 +442,12 @@ export function Sidebar({
               </div>
             </div>
 
-            <div className="my-1 border-t border-zinc-800" />
+            <div className="my-1 border-t border-sidebar-border" />
 
             <button
               type="button"
               onClick={() => handleNewBoardInFolder(f.id)}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left cursor-pointer"
             >
               <Plus className="h-3.5 w-3.5 text-emerald-400" />
               <span>New board</span>
@@ -463,14 +457,14 @@ export function Sidebar({
               <button
                 type="button"
                 onClick={() => handleEmptyFolder(f.id, f.name)}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left cursor-pointer"
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left cursor-pointer"
               >
                 <FolderOpen className="h-3.5 w-3.5 text-amber-400" />
                 <span>Move all boards out</span>
               </button>
             )}
 
-            <div className="my-1 border-t border-zinc-800" />
+            <div className="my-1 border-t border-sidebar-border" />
 
             <button
               type="button"
@@ -489,7 +483,7 @@ export function Sidebar({
           </div>
         )}
         {!f.isCollapsed && folderBoards.length === 0 && (
-          <p className="pl-7 pr-2.5 py-1 text-[11px] text-zinc-500 italic">
+          <p className="pl-7 pr-2.5 py-1 text-[11px] text-sidebar-foreground/50 italic">
             Drag a board here
           </p>
         )}
@@ -504,12 +498,6 @@ export function Sidebar({
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (
-        workspaceDropdownRef.current &&
-        !workspaceDropdownRef.current.contains(event.target as Node)
-      ) {
-        setIsWorkspaceDropdownOpen(false);
-      }
       if (
         plusMenuRef.current &&
         !plusMenuRef.current.contains(event.target as Node)
@@ -568,8 +556,8 @@ export function Sidebar({
       ];
       return searchQuery.trim()
         ? items.filter((b) =>
-            b.name.toLowerCase().includes(searchQuery.toLowerCase())
-          )
+          b.name.toLowerCase().includes(searchQuery.toLowerCase())
+        )
         : items;
     }
 
@@ -587,8 +575,8 @@ export function Sidebar({
 
     return searchQuery.trim()
       ? customItems.filter((b) =>
-          b.name.toLowerCase().includes(searchQuery.toLowerCase())
-        )
+        b.name.toLowerCase().includes(searchQuery.toLowerCase())
+      )
       : customItems;
   };
 
@@ -596,9 +584,9 @@ export function Sidebar({
     return (
       <aside
         aria-label="Application Sidebar"
-        className={`relative flex flex-col h-full bg-[#1e2029] border-r border-[#2d3142] select-none w-16 ${className}`}
+        className={`relative flex flex-col h-full bg-sidebar border-r border-sidebar-border select-none w-16 ${className}`}
       >
-        <div className="flex items-center justify-center h-14 border-b border-[#2d3142]">
+        <div className="flex items-center justify-center h-14 border-b border-sidebar-border">
           <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white font-bold text-sm shadow-md">
             <span>M</span>
             <span className="absolute -bottom-1 -right-1 text-[10px]">🏠</span>
@@ -611,11 +599,10 @@ export function Sidebar({
             href="/"
             onClick={onItemClick}
             title="Overview"
-            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-              pathname === "/"
-                ? "bg-[#36384d] text-white shadow-xs"
-                : "text-zinc-400 hover:text-white hover:bg-zinc-800"
-            }`}
+            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${pathname === "/"
+              ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-xs"
+              : "text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent"
+              }`}
           >
             <Home className="h-4 w-4 text-indigo-400" />
           </Link>
@@ -624,11 +611,10 @@ export function Sidebar({
             href="/calendar"
             onClick={onItemClick}
             title="Calendar"
-            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-              pathname === "/calendar"
-                ? "bg-[#36384d] text-white shadow-xs"
-                : "text-zinc-400 hover:text-white hover:bg-zinc-800"
-            }`}
+            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${pathname === "/calendar"
+              ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-xs"
+              : "text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent"
+              }`}
           >
             <Calendar className="h-4 w-4 text-sky-400" />
           </Link>
@@ -637,11 +623,10 @@ export function Sidebar({
             href="/my-work"
             onClick={onItemClick}
             title="My Work"
-            className={`relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-              pathname === "/my-work"
-                ? "bg-[#36384d] text-white shadow-xs"
-                : "text-zinc-400 hover:text-white hover:bg-zinc-800"
-            }`}
+            className={`relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${pathname === "/my-work"
+              ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-xs"
+              : "text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent"
+              }`}
           >
             <CheckSquare className="h-4 w-4 text-blue-400" />
             {myTasksCount > 0 && (
@@ -653,11 +638,10 @@ export function Sidebar({
             href="/inbox"
             onClick={onItemClick}
             title="Inbox"
-            className={`relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-              pathname === "/inbox"
-                ? "bg-[#36384d] text-white shadow-xs"
-                : "text-zinc-400 hover:text-white hover:bg-zinc-800"
-            }`}
+            className={`relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${pathname === "/inbox"
+              ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-xs"
+              : "text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent"
+              }`}
           >
             <Inbox className="h-4 w-4 text-amber-400" />
             {unreadNotificationCount > 0 && (
@@ -665,7 +649,7 @@ export function Sidebar({
             )}
           </Link>
 
-          <div className="w-8 h-[1px] bg-[#2d3142] my-1" />
+          <div className="w-8 h-[1px] bg-sidebar-border my-1" />
 
           {/* Team Items (Team Dashboard & Project Boards) */}
           {getBoardsForFolder("team-folder").map((b) => {
@@ -677,11 +661,10 @@ export function Sidebar({
                 href={b.href}
                 onClick={onItemClick}
                 title={b.name}
-                className={`relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-                  isActive
-                    ? "bg-[#36384d] text-white shadow-xs"
-                    : "text-zinc-400 hover:text-white hover:bg-zinc-800"
-                }`}
+                className={`relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${isActive
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-xs"
+                  : "text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent"
+                  }`}
               >
                 <Icon className="h-4 w-4" />
                 {b.badge && (
@@ -692,12 +675,12 @@ export function Sidebar({
           })}
         </div>
 
-        <div className="p-2 border-t border-[#2d3142]">
+        <div className="p-2 border-t border-sidebar-border">
           <button
             type="button"
             onClick={onToggleCollapse}
             title="Expand sidebar"
-            className="w-full flex h-8 items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            className="w-full flex h-8 items-center justify-center rounded-lg text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors"
           >
             <PanelLeftOpen className="h-4 w-4" />
           </button>
@@ -709,14 +692,14 @@ export function Sidebar({
   return (
     <aside
       aria-label="Application Sidebar"
-      className={`relative flex flex-col h-full bg-[#181922] text-zinc-200 border-r border-[#262836] select-none w-64 ${className} font-sans`}
+      className={`relative flex flex-col h-full bg-sidebar text-sidebar-foreground border-r border-sidebar-border select-none w-64 ${className} font-sans`}
     >
       {/* Top Global Quick Nav (Calendar, My Work, Inbox) */}
-      <div className="px-3 pt-3 pb-2 space-y-1 border-b border-[#262836]/80 bg-[#161720]">
+      <div className="px-3 pt-3 pb-2 space-y-1 border-b border-sidebar-border/80 bg-sidebar">
         <div className="flex items-center justify-between pb-1">
           <Link
             href="/"
-            className="flex items-center gap-2 font-bold text-sm text-white tracking-tight hover:opacity-90 transition-opacity"
+            className="flex items-center gap-2 font-bold text-sm text-sidebar-foreground tracking-tight hover:opacity-90 transition-opacity"
           >
             <div className="relative flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-600 text-white font-bold text-xs shadow-md">
               <span>M</span>
@@ -729,7 +712,7 @@ export function Sidebar({
             type="button"
             onClick={onToggleCollapse}
             aria-label="Collapse sidebar"
-            className="p-1 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-colors"
+            className="p-1 rounded-md text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/60 transition-colors"
           >
             <PanelLeftClose className="h-4 w-4" />
           </button>
@@ -740,11 +723,10 @@ export function Sidebar({
           <Link
             href="/"
             onClick={onItemClick}
-            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-              pathname === "/"
-                ? "bg-[#36384d] text-white font-semibold shadow-xs"
-                : "text-zinc-300 hover:bg-[#232533] hover:text-white"
-            }`}
+            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${pathname === "/"
+              ? "bg-sidebar-primary text-sidebar-primary-foreground font-semibold shadow-xs"
+              : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              }`}
           >
             <div className="flex items-center gap-2 min-w-0">
               <Home className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
@@ -756,11 +738,10 @@ export function Sidebar({
           <Link
             href="/calendar"
             onClick={onItemClick}
-            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-              pathname === "/calendar"
-                ? "bg-[#36384d] text-white font-semibold shadow-xs"
-                : "text-zinc-300 hover:bg-[#232533] hover:text-white"
-            }`}
+            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${pathname === "/calendar"
+              ? "bg-sidebar-primary text-sidebar-primary-foreground font-semibold shadow-xs"
+              : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              }`}
           >
             <div className="flex items-center gap-2 min-w-0">
               <Calendar className="h-3.5 w-3.5 text-sky-400 shrink-0" />
@@ -772,11 +753,10 @@ export function Sidebar({
           <Link
             href="/my-work"
             onClick={onItemClick}
-            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-              pathname === "/my-work"
-                ? "bg-[#36384d] text-white font-semibold shadow-xs"
-                : "text-zinc-300 hover:bg-[#232533] hover:text-white"
-            }`}
+            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${pathname === "/my-work"
+              ? "bg-sidebar-primary text-sidebar-primary-foreground font-semibold shadow-xs"
+              : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              }`}
           >
             <div className="flex items-center gap-2 min-w-0">
               <CheckSquare className="h-3.5 w-3.5 text-blue-400 shrink-0" />
@@ -793,11 +773,10 @@ export function Sidebar({
           <Link
             href="/inbox"
             onClick={onItemClick}
-            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-              pathname === "/inbox"
-                ? "bg-[#36384d] text-white font-semibold shadow-xs"
-                : "text-zinc-300 hover:bg-[#232533] hover:text-white"
-            }`}
+            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${pathname === "/inbox"
+              ? "bg-sidebar-primary text-sidebar-primary-foreground font-semibold shadow-xs"
+              : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              }`}
           >
             <div className="flex items-center gap-2 min-w-0">
               <Inbox className="h-3.5 w-3.5 text-amber-400 shrink-0" />
@@ -814,39 +793,12 @@ export function Sidebar({
 
       {/* Main Workspace Section (Matching User's Screenshot Exactly) */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 scrollbar-thin">
-        {/* 1. Favorites > */}
-        <div>
-          <button
-            type="button"
-            onClick={() => setIsFavoritesOpen(!isFavoritesOpen)}
-            className="flex items-center gap-1.5 text-xs font-semibold text-zinc-300 hover:text-white transition-colors"
-          >
-            <span>Favorites</span>
-            {isFavoritesOpen ? (
-              <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5 text-zinc-400" />
-            )}
-          </button>
 
-          {isFavoritesOpen && (
-            <div className="mt-1 pl-2 space-y-0.5 border-l border-zinc-700/50">
-              <Link
-                href="/board/board-1"
-                onClick={onItemClick}
-                className="flex items-center gap-2 px-2 py-1 rounded-md text-xs text-zinc-400 hover:text-white hover:bg-zinc-800/50 transition-colors"
-              >
-                <Table className="h-3.5 w-3.5 text-blue-400" />
-                <span className="truncate">Projects & Deliverables</span>
-              </Link>
-            </div>
-          )}
-        </div>
 
         {/* 2. Workspace Header with ... and Search Icon */}
         <div className="space-y-2 pt-1">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-zinc-200 tracking-tight">
+            <h3 className="text-xs font-bold text-sidebar-foreground tracking-tight">
               Workspace
             </h3>
 
@@ -855,7 +807,7 @@ export function Sidebar({
                 type="button"
                 onClick={() => setIsSearchOpen(!isSearchOpen)}
                 title="Search boards"
-                className="p-1 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                className="p-1 rounded-md text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors"
               >
                 <Search className="h-3.5 w-3.5" />
               </button>
@@ -863,7 +815,7 @@ export function Sidebar({
               <button
                 type="button"
                 title="Workspace options"
-                className="p-1 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                className="p-1 rounded-md text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors"
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </button>
@@ -879,19 +831,20 @@ export function Sidebar({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search boards..."
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900/80 px-2.5 py-1 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+                className="w-full rounded-lg border border-sidebar-border bg-sidebar/80 px-2.5 py-1 text-xs text-sidebar-foreground placeholder:text-sidebar-foreground/50 focus:outline-none focus:border-indigo-500"
               />
             </div>
           )}
 
           {/* 3. Workspace Selector Box: unified pill [ [Avatar] TESTER ▾ | + ] */}
-          <div className="flex items-center rounded-lg border border-zinc-700/80 bg-[#1f212c]">
+          <div className="flex items-center rounded-lg border border-sidebar-border/80 bg-sidebar">
             {/* Workspace Button with dropdown */}
-            <div className="relative flex-1" ref={workspaceDropdownRef}>
+            <div className="relative flex-1">
               <button
+                ref={workspaceButtonRef}
                 type="button"
                 onClick={() => setIsWorkspaceDropdownOpen(!isWorkspaceDropdownOpen)}
-                className="w-full flex items-center justify-between hover:bg-[#252836] transition-colors px-2.5 py-1.5 text-left cursor-pointer"
+                className="w-full flex items-center justify-between hover:bg-sidebar-accent transition-colors px-2.5 py-1.5 text-left cursor-pointer"
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <WorkspaceAvatar
@@ -900,33 +853,41 @@ export function Sidebar({
                     icon={workspace.icon || "initial"}
                     size="md"
                   />
-                  <span className="truncate text-xs font-semibold text-white">
+                  <span className="truncate text-xs font-semibold text-sidebar-foreground">
                     {workspace.name || "My Workspace"}
                   </span>
                 </div>
-                <ChevronDown className="h-3.5 w-3.5 text-zinc-400 shrink-0 ml-1" />
+                <ChevronDown className="h-3.5 w-3.5 text-sidebar-foreground/60 shrink-0 ml-1" />
               </button>
 
-              {/* Workspace switch dropdown (Matching User Diagram Stage 1) */}
-              {isWorkspaceDropdownOpen && (
-                <div className="absolute left-0 top-full mt-1 z-50 w-64 rounded-xl border border-zinc-700 bg-[#191a24] p-2 shadow-2xl text-xs animate-in fade-in zoom-in-95">
+              {/* Workspace switch dropdown — portaled via FloatingPanel so it
+                  escapes the sidebar's scroll container instead of being
+                  clipped by its overflow-y-auto. */}
+              <FloatingPanel
+                isOpen={isWorkspaceDropdownOpen}
+                onClose={() => setIsWorkspaceDropdownOpen(false)}
+                anchorRef={workspaceButtonRef}
+                align="left"
+                className="w-64 rounded-xl border border-sidebar-border bg-sidebar p-2 shadow-2xl text-xs"
+              >
+                <>
                   {/* Search for a workspace */}
                   <div className="relative mb-2">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-sidebar-foreground/60" />
                     <input
                       type="text"
                       autoFocus
                       value={workspaceSearchQuery}
                       onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
                       placeholder="Search for a workspace"
-                      className="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-zinc-700/80 bg-zinc-900/90 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+                      className="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-sidebar-border/80 bg-sidebar/90 text-xs text-sidebar-foreground placeholder:text-sidebar-foreground/50 focus:outline-none focus:border-indigo-500"
                     />
                   </div>
 
                   <div className="max-h-56 overflow-y-auto space-y-2 scrollbar-thin">
                     {/* Recent Workspaces */}
                     <div className="space-y-0.5">
-                      <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                      <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/50">
                         Recent workspaces
                       </div>
                       {workspaces
@@ -941,11 +902,10 @@ export function Sidebar({
                           return (
                             <div
                               key={`recent-${ws.id}`}
-                              className={`group/ws flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
-                                isCurrent
-                                  ? "bg-indigo-600/25 text-white font-medium"
-                                  : "text-zinc-300 hover:bg-zinc-800/80 hover:text-white"
-                              }`}
+                              className={`group/ws flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${isCurrent
+                                ? "bg-sidebar-primary/20 text-sidebar-foreground font-medium"
+                                : "text-sidebar-foreground/80 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground"
+                                }`}
                               onClick={() => {
                                 switchWorkspace(ws.id);
                                 setIsWorkspaceDropdownOpen(false);
@@ -968,11 +928,10 @@ export function Sidebar({
                                   e.stopPropagation();
                                   togglePinWorkspace(ws.id);
                                 }}
-                                className={`p-0.5 rounded transition-colors ${
-                                  ws.isPinned
-                                    ? "text-amber-400"
-                                    : "text-zinc-500 opacity-0 group-hover/ws:opacity-100 hover:text-zinc-300"
-                                }`}
+                                className={`p-0.5 rounded transition-colors ${ws.isPinned
+                                  ? "text-amber-400"
+                                  : "text-sidebar-foreground/50 opacity-0 group-hover/ws:opacity-100 hover:text-sidebar-foreground/80"
+                                  }`}
                               >
                                 <Pin className="h-3 w-3" />
                               </button>
@@ -982,8 +941,8 @@ export function Sidebar({
                     </div>
 
                     {/* My Workspaces */}
-                    <div className="space-y-0.5 pt-1 border-t border-zinc-800/80">
-                      <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                    <div className="space-y-0.5 pt-1 border-t border-sidebar-border/80">
+                      <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/50">
                         My workspaces
                       </div>
                       {workspaces
@@ -997,11 +956,10 @@ export function Sidebar({
                           return (
                             <div
                               key={`my-${ws.id}`}
-                              className={`group/ws flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
-                                isCurrent
-                                  ? "bg-indigo-600/25 text-white font-medium"
-                                  : "text-zinc-300 hover:bg-zinc-800/80 hover:text-white"
-                              }`}
+                              className={`group/ws flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${isCurrent
+                                ? "bg-sidebar-primary/20 text-sidebar-foreground font-medium"
+                                : "text-sidebar-foreground/80 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground"
+                                }`}
                               onClick={() => {
                                 switchWorkspace(ws.id);
                                 setIsWorkspaceDropdownOpen(false);
@@ -1028,16 +986,16 @@ export function Sidebar({
                   </div>
 
                   {/* Footer Actions: Browse all + Add workspace */}
-                  <div className="mt-2 pt-1.5 border-t border-zinc-800 space-y-0.5">
+                  <div className="mt-2 pt-1.5 border-t border-sidebar-border space-y-0.5">
                     <button
                       type="button"
                       onClick={() => {
                         setIsWorkspaceDropdownOpen(false);
                         openBrowseWorkspacesModal();
                       }}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left"
                     >
-                      <LayoutGrid className="h-3.5 w-3.5 text-zinc-400" />
+                      <LayoutGrid className="h-3.5 w-3.5 text-sidebar-foreground/60" />
                       <span>Browse all</span>
                     </button>
 
@@ -1047,18 +1005,18 @@ export function Sidebar({
                         setIsWorkspaceDropdownOpen(false);
                         openCreateWorkspaceModal();
                       }}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left"
                     >
-                      <Plus className="h-3.5 w-3.5 text-zinc-400" />
+                      <Plus className="h-3.5 w-3.5 text-sidebar-foreground/60" />
                       <span>Add workspace</span>
                     </button>
                   </div>
-                </div>
-              )}
+                </>
+              </FloatingPanel>
             </div>
 
             {/* Divider */}
-            <div className="w-px h-6 bg-zinc-700/80 shrink-0" />
+            <div className="w-px h-6 bg-sidebar-border shrink-0" />
 
             {/* [+] Button — joined to workspace selector */}
             <div className="relative shrink-0" ref={plusMenuRef}>
@@ -1066,21 +1024,21 @@ export function Sidebar({
                 type="button"
                 onClick={() => setIsPlusMenuOpen(!isPlusMenuOpen)}
                 title="Add new board or item"
-                className="flex h-full px-2.5 py-1.5 items-center justify-center hover:bg-[#252836] text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                className="flex h-full px-2.5 py-1.5 items-center justify-center hover:bg-sidebar-accent text-sidebar-foreground/80 hover:text-sidebar-accent-foreground transition-colors cursor-pointer"
               >
                 <Plus className="h-4 w-4" />
               </button>
 
               {/* [+] Menu popup */}
               {isPlusMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-xl border border-zinc-700 bg-[#1c1e28] p-1.5 shadow-2xl text-xs animate-in fade-in zoom-in-95">
+                <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-xl border border-sidebar-border bg-sidebar p-1.5 shadow-2xl text-xs animate-in fade-in zoom-in-95">
                   {!workspace.id ? (
                     // No real workspace to add any of this to yet — every
                     // option below assumes one exists, so offer to create
                     // one instead of letting these silently fail/attach to
                     // nothing.
                     <div className="p-2 space-y-2">
-                      <p className="text-[11px] text-zinc-400 leading-relaxed px-0.5">
+                      <p className="text-[11px] text-sidebar-foreground/60 leading-relaxed px-0.5">
                         You don't have a workspace yet. Create one first.
                       </p>
                       <button
@@ -1097,67 +1055,67 @@ export function Sidebar({
                     </div>
                   ) : (
                     <>
-                      <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                      <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/50">
                         Add to Workspace
                       </div>
 
                       {isWorkspaceLeader && (
-<button
-                        type="button"
-                        onClick={() => {
-                          setIsPlusMenuOpen(false);
-                          openCreateBoardModal();
-                        }}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
-                      >
-                        <Table className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                        <span>New Board / Project</span>
-                      </button>
-)}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsPlusMenuOpen(false);
+                            openCreateBoardModal();
+                          }}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left"
+                        >
+                          <Table className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                          <span>New Board / Project</span>
+                        </button>
+                      )}
 
                       {isWorkspaceLeader && (
-<button
-                        type="button"
-                        onClick={() => {
-                          setIsPlusMenuOpen(false);
-                          openCreateFolderModal();
-                        }}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
-                      >
-                        <FolderPlus className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                        <span>New Folder</span>
-                      </button>
-)}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsPlusMenuOpen(false);
+                            openCreateFolderModal();
+                          }}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left"
+                        >
+                          <FolderPlus className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                          <span>New Folder</span>
+                        </button>
+                      )}
 
                       {isWorkspaceLeader && (
-<button
-                        type="button"
-                        onClick={() => {
-                          setIsPlusMenuOpen(false);
-                          openInviteMemberModal();
-                        }}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
-                      >
-                        <Users className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                        <span>Add Team / Member</span>
-                      </button>
-)}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsPlusMenuOpen(false);
+                            openInviteMemberModal();
+                          }}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left"
+                        >
+                          <Users className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                          <span>Add Team / Member</span>
+                        </button>
+                      )}
 
-                      <div className="my-1 border-t border-zinc-700/60" />
+                      <div className="my-1 border-t border-sidebar-border/60" />
 
                       {isWorkspaceLeader && (
-<button
-                        type="button"
-                        onClick={() => {
-                          setIsPlusMenuOpen(false);
-                          openCreateDashboardModal();
-                        }}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors text-left"
-                      >
-                        <BarChart3 className="h-3.5 w-3.5 text-purple-400 shrink-0" />
-                        <span>New Dashboard View</span>
-                      </button>
-)}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsPlusMenuOpen(false);
+                            openCreateDashboardModal();
+                          }}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-left"
+                        >
+                          <BarChart3 className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                          <span>New Dashboard View</span>
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -1178,7 +1136,7 @@ export function Sidebar({
           return (
             <div className="space-y-1 pt-1">
               <div className="px-1">
-                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                <span className="text-[10px] font-bold text-sidebar-foreground/50 uppercase tracking-wider">
                   Dashboards
                 </span>
               </div>
@@ -1187,17 +1145,15 @@ export function Sidebar({
                 return (
                   <div
                     key={d.id}
-                    className={`group flex items-center gap-1 rounded-lg pr-1 transition-colors ${
-                      isActive ? "bg-zinc-800 text-white" : "hover:bg-zinc-800/60"
-                    }`}
+                    className={`group flex items-center gap-1 rounded-lg pr-1 transition-colors ${isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60"
+                      }`}
                   >
                     <Link
                       href={`/workspace/${workspace.id}/dashboard/${d.id}`}
                       draggable={false}
                       onClick={onItemClick}
-                      className={`flex items-center gap-2 flex-1 min-w-0 px-2 py-1.5 text-xs ${
-                        isActive ? "text-white" : "text-zinc-300 hover:text-white"
-                      }`}
+                      className={`flex items-center gap-2 flex-1 min-w-0 px-2 py-1.5 text-xs ${isActive ? "text-sidebar-accent-foreground" : "text-sidebar-foreground/80 hover:text-sidebar-accent-foreground"
+                        }`}
                     >
                       <BarChart3 className="h-3.5 w-3.5 text-purple-400 shrink-0" />
                       <span className="truncate">{d.name}</span>
@@ -1210,7 +1166,7 @@ export function Sidebar({
                         if (confirm(`Delete dashboard "${d.name}"?`)) deleteDashboard(d.id);
                       }}
                       title="Delete dashboard"
-                      className="opacity-0 group-hover:opacity-100 shrink-0 flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                      className="opacity-0 group-hover:opacity-100 shrink-0 flex h-5 w-5 items-center justify-center rounded text-sidebar-foreground/50 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>
@@ -1233,11 +1189,11 @@ export function Sidebar({
             const ungroupedBoards = activeWorkspaceBoards.filter((b) => !b.folderId);
 
             return activeWorkspaceFolders.length === 0 && activeWorkspaceBoards.length === 0 ? (
-              <div className="p-3 text-center rounded-xl border border-dashed border-zinc-700/60 bg-zinc-900/40 space-y-2">
+              <div className="p-3 text-center rounded-xl border border-dashed border-sidebar-border/60 bg-sidebar/40 space-y-2">
                 {!workspace.id ? (
                   <>
-                    <p className="text-xs text-zinc-300 font-medium">No workspace yet</p>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                    <p className="text-xs text-sidebar-foreground/80 font-medium">No workspace yet</p>
+                    <p className="text-[11px] text-sidebar-foreground/50 leading-relaxed">
                       Create your own workspace, or ask to be invited to one.
                     </p>
                     <div className="pt-1">
@@ -1253,31 +1209,31 @@ export function Sidebar({
                   </>
                 ) : (
                   <>
-                    <p className="text-xs text-zinc-300 font-medium">No projects yet</p>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                    <p className="text-xs text-sidebar-foreground/80 font-medium">No projects yet</p>
+                    <p className="text-[11px] text-sidebar-foreground/50 leading-relaxed">
                       Create a project in {workspace.name} to get started.
                     </p>
                     <div className="pt-1 flex flex-col gap-1.5">
                       {isWorkspaceLeader && (
-<button
-                        type="button"
-                        onClick={openCreateBoardModal}
-                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs transition-colors"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        <span>Create First Project</span>
-                      </button>
-)}
+                        <button
+                          type="button"
+                          onClick={openCreateBoardModal}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs transition-colors"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>Create First Project</span>
+                        </button>
+                      )}
                       {isWorkspaceLeader && (
-<button
-                        type="button"
-                        onClick={openInviteMemberModal}
-                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800 text-zinc-300 hover:text-white text-xs font-medium transition-colors"
-                      >
-                        <Users className="h-3.5 w-3.5 text-emerald-400" />
-                        <span>Invite Members</span>
-                      </button>
-)}
+                        <button
+                          type="button"
+                          onClick={openInviteMemberModal}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-sidebar-border hover:bg-sidebar-accent text-sidebar-foreground/80 hover:text-sidebar-accent-foreground text-xs font-medium transition-colors"
+                        >
+                          <Users className="h-3.5 w-3.5 text-emerald-400" />
+                          <span>Invite Members</span>
+                        </button>
+                      )}
                     </div>
                   </>
                 )}
@@ -1305,9 +1261,8 @@ export function Sidebar({
                     e.preventDefault();
                     handleDropOnUngrouped();
                   }}
-                  className={`space-y-0.5 rounded-lg transition-colors ${
-                    isDragOverUngrouped ? "bg-indigo-600/10 ring-1 ring-indigo-500/50" : ""
-                  }`}
+                  className={`space-y-0.5 rounded-lg transition-colors ${isDragOverUngrouped ? "bg-indigo-600/10 ring-1 ring-indigo-500/50" : ""
+                    }`}
                 >
                   {ungroupedBoards.map((b) => renderBoardRow(b))}
                 </div>

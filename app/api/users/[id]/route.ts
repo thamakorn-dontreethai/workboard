@@ -1,30 +1,55 @@
 import { NextResponse } from "next/server";
-import { updateNotificationPreferences } from "@/lib/server/db";
+import { updateNotificationPreferences, updateUserProfile } from "@/lib/server/db";
+import { requireSession } from "@/lib/server/permissions";
 
-// Deliberately narrow: this only accepts the notification opt-out toggles,
-// not a generic user-update endpoint — profile fields (name/email/avatar)
-// go through their own dedicated flows.
+// Accepts the notification opt-out toggles and basic profile fields
+// (name/avatarColor). Email/password/role changes go through their own
+// dedicated flows (login/register, change-password).
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    const body = await request.json();
-    const updates: Record<string, boolean> = {};
-    if (typeof body.notifyPostLikes === "boolean") updates.notifyPostLikes = body.notifyPostLikes;
-    if (typeof body.notifyPostComments === "boolean")
-      updates.notifyPostComments = body.notifyPostComments;
-    if (typeof body.notifyNewPosts === "boolean") updates.notifyNewPosts = body.notifyNewPosts;
-
-    if (Object.keys(updates).length === 0) {
+    const session = requireSession(request);
+    if (!session.ok) return session.response;
+    if (session.userId !== id) {
       return NextResponse.json(
-        { success: false, error: "No valid notification preference fields provided" },
+        { success: false, error: "You can only edit your own profile" },
+        { status: 403 }
+      );
+    }
+
+    const body = await request.json();
+    const notificationUpdates: Record<string, boolean> = {};
+    if (typeof body.notifyPostLikes === "boolean") notificationUpdates.notifyPostLikes = body.notifyPostLikes;
+    if (typeof body.notifyPostComments === "boolean")
+      notificationUpdates.notifyPostComments = body.notifyPostComments;
+    if (typeof body.notifyNewPosts === "boolean") notificationUpdates.notifyNewPosts = body.notifyNewPosts;
+
+    const profileUpdates: { name?: string; avatarColor?: string } = {};
+    if (typeof body.name === "string" && body.name.trim()) profileUpdates.name = body.name;
+    if (typeof body.avatarColor === "string" && body.avatarColor.trim())
+      profileUpdates.avatarColor = body.avatarColor;
+
+    if (
+      Object.keys(notificationUpdates).length === 0 &&
+      Object.keys(profileUpdates).length === 0
+    ) {
+      return NextResponse.json(
+        { success: false, error: "No valid fields provided" },
         { status: 400 }
       );
     }
 
-    const user = await updateNotificationPreferences(id, updates);
+    let user = null;
+    if (Object.keys(notificationUpdates).length > 0) {
+      user = await updateNotificationPreferences(id, notificationUpdates);
+    }
+    if (Object.keys(profileUpdates).length > 0) {
+      user = await updateUserProfile(id, profileUpdates);
+    }
+
     if (!user) {
       return NextResponse.json(
         { success: false, error: "User not found" },

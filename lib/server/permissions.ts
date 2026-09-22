@@ -110,3 +110,28 @@ export async function authorizeSubtask(request: Request, subtaskId: string, acti
   }
   return authorizeTask(request, subtask.taskId, action);
 }
+
+// Workspace-level access. "view" = any member (e.g. recording last-viewed),
+// "manage" = owner/admin (rename, colours, cover, privacy, members),
+// "owner" = the workspace owner only (deleting it).
+export async function authorizeWorkspace(
+  request: Request,
+  workspaceId: string,
+  level: "view" | "manage" | "owner"
+): Promise<AuthResult> {
+  const session = requireSession(request);
+  if (!session.ok) return session;
+
+  const workspace = await getWorkspaceById(workspaceId);
+  if (!workspace) return deny(404, "Workspace not found");
+
+  const role = workspace.members.find((m) => m.userId === session.userId)?.role;
+  if (!role) return deny(403, "You are not a member of this workspace");
+  if (level === "owner" && role !== "owner") {
+    return deny(403, "Only the workspace owner can do this");
+  }
+  if (level === "manage" && role !== "owner" && role !== "admin") {
+    return deny(403, "Only workspace owners and admins can do this");
+  }
+  return { ok: true, userId: session.userId, role: null };
+}

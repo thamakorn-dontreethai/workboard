@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { resetDb } from "../lib/server/db";
+import { SESSION_COOKIE, createSessionToken } from "../lib/server/session";
 import { GET as getWorkspacesRoute, POST as postWorkspaceRoute } from "../app/api/workspaces/route";
 import {
   GET as getWorkspaceByIdRoute,
   PATCH as patchWorkspaceRoute,
   DELETE as deleteWorkspaceRoute,
 } from "../app/api/workspaces/[id]/route";
+
+// Somchai owns the mock workspace "ws-1"; workspace writes now need a signed-in
+// session (see lib/server/permissions.ts).
+const asOwner = { Cookie: `${SESSION_COOKIE}=${createSessionToken("user-somchai")}` };
 
 describe("Workspace Management API Tests", () => {
   beforeEach(() => {
@@ -25,7 +30,7 @@ describe("Workspace Management API Tests", () => {
   it("POST /api/workspaces should create a new workspace with privacy", async () => {
     const req = new Request("http://localhost:3000/api/workspaces", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...asOwner },
       body: JSON.stringify({
         name: "DevOps & Cloud Engineering",
         description: "Infrastructure management and CI/CD pipelines",
@@ -45,7 +50,7 @@ describe("Workspace Management API Tests", () => {
   it("PATCH /api/workspaces/[id] should update description and toggle pin", async () => {
     const patchReq = new Request("http://localhost:3000/api/workspaces/ws-1", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...asOwner },
       body: JSON.stringify({
         action: "togglePin",
       }),

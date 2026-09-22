@@ -50,6 +50,13 @@ model User {
   notifyPostLikes    Boolean @default(true)
   notifyPostComments Boolean @default(true)
   notifyNewPosts     Boolean @default(true)
+  // LINE Messaging API linkage — lineUserId is set once the person finishes
+  // the "connect LINE" flow (sends their link code to the bot). The code
+  // fields are only populated while a link is pending and are cleared once
+  // used or expired.
+  lineUserId            String?
+  lineLinkCode          String?
+  lineLinkCodeExpiresAt DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   reportedTasks  Task[]         @relation("Reporter")
@@ -179,6 +186,10 @@ model Task {
   reporterId  String
   reporter    User       @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
   dueDate     DateTime?
+  // Set once a "due soon" LINE/notification reminder has fired for the
+  // task's current dueDate, so the periodic checker doesn't re-notify on
+  // every poll. Cleared whenever dueDate changes (see updateTask).
+  dueSoonReminderSentAt DateTime?
   category    String     @default("General")
   order       Int        @default(0)
   isArchived  Boolean    @default(false)
