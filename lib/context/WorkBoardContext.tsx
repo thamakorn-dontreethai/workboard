@@ -278,6 +278,7 @@ interface WorkBoardContextType {
   updateProfile: (updates: {
     name?: string;
     avatarColor?: string;
+    avatarUrl?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
   changePassword: (
     currentPassword: string,
@@ -433,6 +434,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   // the real current state instead of whatever this one browser cached.
   useEffect(() => {
     let cancelled = false;
+    // On a slow link a full hydration can outlast POLL_INTERVAL_MS. Without
+    // this guard each tick piles another eight requests on top of the ones
+    // still in flight, and since browsers only open ~6 connections per
+    // origin, ordinary clicks end up queued behind that backlog. Skip a tick
+    // rather than stacking on it.
+    let inFlight = false;
 
     // A single failed request (dev-server recompile, cold serverless start,
     // brief DB hiccup) used to leave that slice empty until the next manual
@@ -451,6 +458,8 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     }
 
     async function hydrateFromServer() {
+      if (inFlight) return;
+      inFlight = true;
       const fetchStartedAt = Date.now();
       try {
         // Workspaces are hydrated separately, once the signed-in user is
@@ -549,6 +558,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       } catch (err) {
         console.error("Failed to hydrate board data from the database:", err);
       } finally {
+        inFlight = false;
         if (!cancelled) setIsServerHydrated(true);
       }
     }
@@ -971,7 +981,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateProfile = useCallback(
-    async (updates: { name?: string; avatarColor?: string }) => {
+    async (updates: { name?: string; avatarColor?: string; avatarUrl?: string | null }) => {
       try {
         const res = await fetch(`/api/users/${currentUser.id}`, {
           method: "PATCH",

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { sendAppointmentReminderEmail } from "./email";
 import { hashPassword, verifyPassword } from "./auth";
@@ -415,23 +416,61 @@ export async function togglePinWorkspace(id: string): Promise<Workspace> {
 
 // ─── Users Operations ────────────────────────────────────────────────────────
 
+// Row shape shared by the user reads below. The uploaded photo lives in
+// `User.avatarUrl` as a base64 data URL, which is far too big to ship inside
+// every payload that happens to mention a person — a single one can dwarf the
+// rest of the response. So it is never selected here: the queries ask only
+// whether a photo exists, and callers get a link to the route that serves it
+// (the same trick comment attachments use).
+type UserRow = {
+  id: string;
+  name: string;
+  email: string;
+  avatarInitials: string;
+  avatarColor: string;
+  hasAvatar: boolean;
+  role: string;
+  isActive: boolean;
+  notifyPostLikes: boolean;
+  notifyPostComments: boolean;
+  notifyNewPosts: boolean;
+  updatedAt: Date;
+};
+
+const USER_COLUMNS = Prisma.sql`
+  u.id, u.name, u.email, u."avatarInitials", u."avatarColor", u.role, u."isActive",
+  u."notifyPostLikes", u."notifyPostComments", u."notifyNewPosts", u."updatedAt",
+  (u."avatarUrl" IS NOT NULL) AS "hasAvatar"
+`;
+
+function mapUserRow(u: UserRow): User {
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    avatarInitials: u.avatarInitials,
+    avatarColor: u.avatarColor,
+    // Versioned by updatedAt so a newly uploaded photo isn't masked by the
+    // previous one sitting in the browser cache.
+    avatarUrl: u.hasAvatar
+      ? `/api/users/${u.id}/avatar?v=${new Date(u.updatedAt).getTime()}`
+      : null,
+    role: u.role,
+    isActive: u.isActive,
+    notifyPostLikes: u.notifyPostLikes,
+    notifyPostComments: u.notifyPostComments,
+    notifyNewPosts: u.notifyNewPosts,
+  };
+}
+
 export async function getUsers(): Promise<User[]> {
   if (isPrismaEnabled) {
     try {
-      const users = await prisma.user.findMany({ where: { isActive: true } });
+      const rows = await prisma.$queryRaw<UserRow[]>`
+        SELECT ${USER_COLUMNS} FROM "User" u WHERE u."isActive" = true
+      `;
       // An empty array is a legitimate answer, not a signal to fall back.
-      return users.map((u) => ({
-        id: u.id,
-        name: u.name,
-        email: u.email,
-        avatarInitials: u.avatarInitials,
-        avatarColor: u.avatarColor,
-        role: u.role,
-        isActive: u.isActive,
-        notifyPostLikes: u.notifyPostLikes,
-        notifyPostComments: u.notifyPostComments,
-        notifyNewPosts: u.notifyNewPosts,
-      }));
+      return rows.map(mapUserRow);
     } catch (e) {
       console.warn("Prisma getUsers fallback:", e);
     }
@@ -442,26 +481,31 @@ export async function getUsers(): Promise<User[]> {
 export async function getUserById(id: string): Promise<User | undefined> {
   if (isPrismaEnabled) {
     try {
-      const u = await prisma.user.findUnique({ where: { id } });
-      if (u) {
-        return {
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          avatarInitials: u.avatarInitials,
-          avatarColor: u.avatarColor,
-          role: u.role,
-          isActive: u.isActive,
-          notifyPostLikes: u.notifyPostLikes,
-          notifyPostComments: u.notifyPostComments,
-          notifyNewPosts: u.notifyNewPosts,
-        };
-      }
+      const rows = await prisma.$queryRaw<UserRow[]>`
+        SELECT ${USER_COLUMNS} FROM "User" u WHERE u.id = ${id}
+      `;
+      if (rows[0]) return mapUserRow(rows[0]);
     } catch (e) {
       console.warn("Prisma getUserById fallback:", e);
     }
   }
   return readDb().users.find((u) => u.id === id);
+}
+
+// Server-side only: the stored data URL for the avatar route to decode.
+export async function getUserAvatarDataUrl(id: string): Promise<string | null> {
+  if (isPrismaEnabled) {
+    try {
+      const rows = await prisma.$queryRaw<{ avatarUrl: string | null }[]>`
+        SELECT u."avatarUrl" FROM "User" u WHERE u.id = ${id}
+      `;
+      return rows[0]?.avatarUrl ?? null;
+    } catch (e) {
+      console.warn("Prisma getUserAvatarDataUrl failed:", e);
+      return null;
+    }
+  }
+  return readDb().users.find((u) => u.id === id)?.avatarUrl ?? null;
 }
 
 export async function createUser(userData: {
@@ -933,7 +977,8 @@ export async function getGroups(boardId?: string): Promise<Group[]> {
     try {
       const groups = await prisma.group.findMany({
         where: boardId ? { boardId } : undefined,
-        include: { tasks: { where: { isArchived: false } } },
+        // taskIds below needs the ids, not the whole task rows.
+        include: { tasks: { where: { isArchived: false }, select: { id: true } } },
         orderBy: { order: "asc" },
       });
       return groups.map((g) => ({
@@ -1081,21 +1126,39 @@ export async function getTasks(filter?: {
 }): Promise<Task[]> {
   if (isPrismaEnabled) {
     try {
-      const tasks = await prisma.task.findMany({
-        where: {
-          isArchived: false,
-          ...(filter?.boardId && { boardId: filter.boardId }),
-          ...(filter?.groupId && { groupId: filter.groupId }),
-          ...(filter?.assigneeId && { assigneeIds: { has: filter.assigneeId } }),
-          ...(filter?.status && { status: filter.status }),
-        },
-        include: {
-          subtasks: true,
-          comments: true,
-          activities: true,
-        },
-        orderBy: { order: "asc" },
-      });
+      const where = {
+        isArchived: false,
+        ...(filter?.boardId && { boardId: filter.boardId }),
+        ...(filter?.groupId && { groupId: filter.groupId }),
+        ...(filter?.assigneeId && { assigneeIds: { has: filter.assigneeId } }),
+        ...(filter?.status && { status: filter.status }),
+      };
+
+      // Only the *ids* of the related rows are ever used below, so fetch them
+      // as flat id/taskId pairs in parallel instead of `include`-ing whole
+      // rows. Including them pulled every comment's base64 attachments along
+      // for the ride, which is what made this list take the better part of a
+      // minute; the four parallel queries land in a couple of seconds.
+      const [tasks, subtaskRefs, commentRefs, activityRefs] = await Promise.all([
+        prisma.task.findMany({ where, orderBy: { order: "asc" } }),
+        prisma.subtask.findMany({ select: { id: true, taskId: true } }),
+        prisma.comment.findMany({ select: { id: true, taskId: true } }),
+        prisma.activity.findMany({ select: { id: true, taskId: true } }),
+      ]);
+
+      const groupByTask = (refs: { id: string; taskId: string | null }[]) => {
+        const map = new Map<string, string[]>();
+        for (const r of refs) {
+          if (!r.taskId) continue;
+          const list = map.get(r.taskId);
+          if (list) list.push(r.id);
+          else map.set(r.taskId, [r.id]);
+        }
+        return map;
+      };
+      const subtasksByTask = groupByTask(subtaskRefs);
+      const commentsByTask = groupByTask(commentRefs);
+      const activitiesByTask = groupByTask(activityRefs);
 
       return tasks.map((t) => ({
         id: t.id,
@@ -1111,10 +1174,10 @@ export async function getTasks(filter?: {
         dueDate: t.dueDate,
         category: t.category,
         tags: [],
-        subtaskIds: t.subtasks.map((s) => s.id),
-        commentIds: t.comments.map((c) => c.id),
+        subtaskIds: subtasksByTask.get(t.id) ?? [],
+        commentIds: commentsByTask.get(t.id) ?? [],
         attachmentIds: [],
-        activityIds: t.activities.map((a) => a.id),
+        activityIds: activitiesByTask.get(t.id) ?? [],
         order: t.order,
         isArchived: t.isArchived,
         createdAt: t.createdAt,
@@ -1149,7 +1212,13 @@ export async function getTaskById(id: string): Promise<Task | undefined> {
     try {
       const t = await prisma.task.findUnique({
         where: { id },
-        include: { subtasks: true, comments: true, activities: true },
+        // Only the relation ids are read below — selecting whole rows drags
+        // each comment's base64 attachments along with them.
+        include: {
+          subtasks: { select: { id: true } },
+          comments: { select: { id: true } },
+          activities: { select: { id: true } },
+        },
       });
       if (t && !t.isArchived) {
         return {
@@ -1332,7 +1401,13 @@ export async function updateTask(
           ...(updates.groupId && { groupId: updates.groupId }),
           ...(updates.order !== undefined && { order: updates.order }),
         },
-        include: { subtasks: true, comments: true, activities: true },
+        // Only the relation ids are read below — selecting whole rows drags
+        // each comment's base64 attachments along with them.
+        include: {
+          subtasks: { select: { id: true } },
+          comments: { select: { id: true } },
+          activities: { select: { id: true } },
+        },
       });
 
       if (updates.status) {
@@ -1422,7 +1497,12 @@ export async function assignTask(
       const updated = await prisma.task.update({
         where: { id: taskId },
         data: { assigneeIds: newAssigneeIds },
-        include: { subtasks: true, comments: true, activities: true, board: { select: { name: true } } },
+        include: {
+          subtasks: { select: { id: true } },
+          comments: { select: { id: true } },
+          activities: { select: { id: true } },
+          board: { select: { name: true } },
+        },
       });
 
       const effectiveActorId = actorId || updated.reporterId;
@@ -1730,12 +1810,35 @@ async function notifyCommentRecipients(
 export async function getComments(taskId?: string): Promise<Comment[]> {
   if (isPrismaEnabled) {
     try {
-      const comments = await prisma.comment.findMany({
-        where: taskId ? { taskId } : undefined,
-        orderBy: { createdAt: "desc" },
-      });
+      // `attachments` holds base64 data URLs, and a single PDF can be hundreds
+      // of kilobytes. toPublicComment() throws those `url`s away anyway, so
+      // strip them inside Postgres (`e - 'url'`) rather than hauling every
+      // blob across the wire just to drop it — that alone took this list from
+      // ~40s to well under a second.
+      const rows = await prisma.$queryRaw<
+        {
+          id: string;
+          taskId: string;
+          authorId: string;
+          content: string;
+          isEdited: boolean;
+          createdAt: Date;
+          updatedAt: Date;
+          attachments: unknown;
+        }[]
+      >`
+        SELECT c.id, c."taskId", c."authorId", c.content, c."isEdited",
+               c."createdAt", c."updatedAt",
+               COALESCE(
+                 (SELECT jsonb_agg(e - 'url') FROM jsonb_array_elements(c.attachments) e),
+                 '[]'::jsonb
+               ) AS attachments
+        FROM "Comment" c
+        ${taskId ? Prisma.sql`WHERE c."taskId" = ${taskId}` : Prisma.empty}
+        ORDER BY c."createdAt" DESC
+      `;
       // An empty array is a legitimate answer, not a signal to fall back.
-      return comments.map((c) => toPublicComment(mapCommentRow(c)));
+      return rows.map((c) => toPublicComment(mapCommentRow(c)));
     } catch (e) {
       console.warn("Prisma getComments fallback:", e);
     }
@@ -2512,7 +2615,7 @@ export async function updateNotificationPreferences(
 ): Promise<User | null> {
   if (!isPrismaEnabled) return null;
   try {
-    const u = await prisma.user.update({
+    await prisma.user.update({
       where: { id: userId },
       data: {
         ...(updates.notifyPostLikes !== undefined && { notifyPostLikes: updates.notifyPostLikes }),
@@ -2521,19 +2624,11 @@ export async function updateNotificationPreferences(
         }),
         ...(updates.notifyNewPosts !== undefined && { notifyNewPosts: updates.notifyNewPosts }),
       },
+      select: { id: true },
     });
-    return {
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      avatarInitials: u.avatarInitials,
-      avatarColor: u.avatarColor,
-      role: u.role,
-      isActive: u.isActive,
-      notifyPostLikes: u.notifyPostLikes,
-      notifyPostComments: u.notifyPostComments,
-      notifyNewPosts: u.notifyNewPosts,
-    };
+    // Re-read rather than returning the updated row: that row carries the
+    // avatar blob, and this shape is what the client stores as currentUser.
+    return (await getUserById(userId)) ?? null;
   } catch (e) {
     console.warn("Prisma updateNotificationPreferences failed:", e);
     return null;
@@ -2554,32 +2649,29 @@ function initialsFromName(name: string): string {
 
 export async function updateUserProfile(
   userId: string,
-  updates: { name?: string; avatarColor?: string }
+  updates: { name?: string; avatarColor?: string; avatarUrl?: string | null }
 ): Promise<User | null> {
   const name = updates.name?.trim();
   const avatarColor = updates.avatarColor?.trim();
+  // avatarUrl is allowed to be explicitly null (remove photo) or undefined
+  // (leave untouched), so it's checked separately from the trimmed strings.
+  const avatarUrlProvided = "avatarUrl" in updates;
+  const avatarUrl = updates.avatarUrl ? updates.avatarUrl.trim() || null : updates.avatarUrl;
 
   if (isPrismaEnabled) {
     try {
-      const u = await prisma.user.update({
+      await prisma.user.update({
         where: { id: userId },
         data: {
           ...(name && { name, avatarInitials: initialsFromName(name) }),
           ...(avatarColor && { avatarColor }),
+          ...(avatarUrlProvided && { avatarUrl }),
         },
+        select: { id: true },
       });
-      return {
-        id: u.id,
-        name: u.name,
-        email: u.email,
-        avatarInitials: u.avatarInitials,
-        avatarColor: u.avatarColor,
-        role: u.role,
-        isActive: u.isActive,
-        notifyPostLikes: u.notifyPostLikes,
-        notifyPostComments: u.notifyPostComments,
-        notifyNewPosts: u.notifyNewPosts,
-      };
+      // Hand back the link-to-the-route form, not the data URL that was just
+      // uploaded — the client has no use for the blob it already holds.
+      return (await getUserById(userId)) ?? null;
     } catch (e) {
       console.warn("Prisma updateUserProfile failed:", e);
       return null;
@@ -2593,6 +2685,7 @@ export async function updateUserProfile(
     ...db.users[idx],
     ...(name && { name, avatarInitials: initialsFromName(name) }),
     ...(avatarColor && { avatarColor }),
+    ...(avatarUrlProvided && { avatarUrl }),
   };
   writeDb(db);
   const { password: _pw, ...safeUser } = db.users[idx];

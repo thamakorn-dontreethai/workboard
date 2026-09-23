@@ -42,6 +42,7 @@ model User {
   password       String?
   avatarInitials String
   avatarColor    String
+  avatarUrl      String?        @db.Text
   role           String         @default("Member")
   isActive       Boolean        @default(true)
   // Per-type opt-out switches for the Posts feed's notifications — each

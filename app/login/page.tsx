@@ -53,13 +53,12 @@ function LoginForm() {
     }
   };
 
-  const registerHref = `/register${
-    redirect !== "/"
+  const registerHref = `/register${redirect !== "/"
       ? `?redirect=${encodeURIComponent(redirect)}${email ? `&email=${encodeURIComponent(email)}` : ""}`
       : email
-      ? `?email=${encodeURIComponent(email)}`
-      : ""
-  }`;
+        ? `?email=${encodeURIComponent(email)}`
+        : ""
+    }`;
 
   return (
     <div className="bg-[#181b34]/90 backdrop-blur-xl py-8 px-6 sm:px-10 shadow-2xl rounded-2xl border border-zinc-700/50">
@@ -189,9 +188,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <h2 className="text-center text-2xl font-bold tracking-tight text-white">
-          Welcome back
-        </h2>
+
         <p className="mt-1.5 text-center text-sm text-zinc-400">
           Sign in to manage projects, teams, and deliverables
         </p>

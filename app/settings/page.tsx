@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 import {
   ArrowLeft,
+  Camera,
   Check,
   KeyRound,
   Mail,
@@ -12,8 +13,11 @@ import {
   Pencil,
   ShieldCheck,
   Palette,
+  Trash2,
   X,
 } from "lucide-react";
+
+const MAX_AVATAR_PHOTO_BYTES = 5 * 1024 * 1024; // 5MB
 
 // Same palette used for freshly-registered accounts (see AVATAR_COLORS in
 // app/api/auth/register/route.ts) — avatarColor is a Tailwind bg class
@@ -77,6 +81,54 @@ export default function SettingsPage() {
     const result = await updateProfile({ avatarColor: color });
     setIsSavingColor(false);
     if (!result.success) setColorError(result.error || "Failed to save color");
+  };
+
+  // ─── Profile Photo (upload) ───────────────────────────────────────────
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [isSavingPhoto, setIsSavingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  // currentUser.avatarUrl points at /api/users/[id]/avatar, so straight after
+  // an upload the browser would have to fetch back the very image it just
+  // sent. Show the local copy until then.
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const avatarSrc = photoPreview ?? currentUser.avatarUrl;
+
+  const handlePhotoFile = (file: File) => {
+    setPhotoError(null);
+    if (!file.type.startsWith("image/")) {
+      setPhotoError("Please choose an image file");
+      return;
+    }
+    if (file.size > MAX_AVATAR_PHOTO_BYTES) {
+      setPhotoError("Image must be smaller than 5MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const dataUrl = e.target?.result as string;
+      setIsSavingPhoto(true);
+      const result = await updateProfile({ avatarUrl: dataUrl });
+      setIsSavingPhoto(false);
+      if (result.success) setPhotoPreview(dataUrl);
+      else setPhotoError(result.error || "Failed to upload photo");
+    };
+    reader.onerror = () => setPhotoError("Failed to read the selected file");
+    reader.readAsDataURL(file);
+  };
+
+  const handlePhotoInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handlePhotoFile(file);
+    e.target.value = "";
+  };
+
+  const removePhoto = async () => {
+    setPhotoError(null);
+    setIsSavingPhoto(true);
+    const result = await updateProfile({ avatarUrl: null });
+    setIsSavingPhoto(false);
+    if (result.success) setPhotoPreview(null);
+    else setPhotoError(result.error || "Failed to remove photo");
   };
 
   // ─── Change Password ──────────────────────────────────────────────────
@@ -224,11 +276,38 @@ export default function SettingsPage() {
       {/* Profile Card */}
       <div className="rounded-2xl border border-zinc-800 bg-[#1c1c1f] p-5 shadow-sm">
         <div className="flex items-center gap-4">
-          <div
-            className={`flex h-14 w-14 items-center justify-center rounded-full text-white font-bold text-lg shrink-0 ring-2 ring-zinc-800 ${currentUser.avatarColor || "bg-[#0073ea]"
-              }`}
-          >
-            {currentUser.avatarInitials}
+          <div className="relative shrink-0">
+            {avatarSrc ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={avatarSrc}
+                alt={currentUser.name}
+                className="h-14 w-14 rounded-full object-cover ring-2 ring-zinc-800"
+              />
+            ) : (
+              <div
+                className={`flex h-14 w-14 items-center justify-center rounded-full text-white font-bold text-lg ring-2 ring-zinc-800 ${currentUser.avatarColor || "bg-[#0073ea]"
+                  }`}
+              >
+                {currentUser.avatarInitials}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              disabled={isSavingPhoto}
+              title="Upload photo"
+              className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-[#0073ea] hover:bg-[#0060c0] text-white ring-2 ring-[#1c1c1f] disabled:opacity-50 transition-colors"
+            >
+              <Camera className="h-3 w-3" />
+            </button>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePhotoInputChange}
+            />
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-white">{currentUser.name}</p>
@@ -236,8 +315,22 @@ export default function SettingsPage() {
               <Mail className="h-3.5 w-3.5 shrink-0" />
               {currentUser.email}
             </p>
+            {avatarSrc && (
+              <button
+                type="button"
+                onClick={removePhoto}
+                disabled={isSavingPhoto}
+                className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-rose-400 disabled:opacity-50 transition-colors"
+              >
+                <Trash2 className="h-3 w-3" />
+                Remove photo
+              </button>
+            )}
           </div>
         </div>
+        {photoError && (
+          <p className="mt-2 text-[11px] text-rose-400">{photoError}</p>
+        )}
 
         {/* Name (editable) */}
         <div className="mt-5 pt-5 border-t border-zinc-800">
@@ -295,7 +388,9 @@ export default function SettingsPage() {
           <h2 className="text-sm font-bold text-white">Change Profile</h2>
         </div>
         <p className="text-[11px] text-zinc-500 mb-3.5">
-          Pick a color for your avatar
+          {avatarSrc
+            ? "Used when your photo is removed"
+            : "Pick a color for your avatar"}
         </p>
         <div className="flex flex-wrap gap-2.5">
           {AVATAR_COLOR_PALETTE.map((c) => (

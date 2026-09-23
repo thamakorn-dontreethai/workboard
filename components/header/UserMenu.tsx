@@ -48,12 +48,23 @@ export function UserMenu() {
         aria-label={`User menu: ${currentUser.name} (${currentUser.role})`}
         className="flex items-center gap-2 rounded-full p-0.5 hover:ring-2 hover:ring-primary/40 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <div
-          className={`relative flex h-7 w-7 items-center justify-center rounded-full text-white font-bold text-xs shadow-xs ${
-            currentUser.avatarColor || "bg-primary"
-          }`}
-        >
-          <span>{currentUser.avatarInitials}</span>
+        <div className="relative">
+          {currentUser.avatarUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={currentUser.avatarUrl}
+              alt={currentUser.name}
+              className="h-7 w-7 rounded-full object-cover shadow-xs"
+            />
+          ) : (
+            <div
+              className={`flex h-7 w-7 items-center justify-center rounded-full text-white font-bold text-xs shadow-xs ${
+                currentUser.avatarColor || "bg-primary"
+              }`}
+            >
+              <span>{currentUser.avatarInitials}</span>
+            </div>
+          )}
           <span className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-background" />
         </div>
       </button>
@@ -67,13 +78,22 @@ export function UserMenu() {
           {/* Active User Header */}
           <div className="px-3 py-2.5 border-b border-border/60 bg-muted/20 rounded-xl mb-1">
             <div className="flex items-center gap-2">
-              <div
-                className={`flex h-8 w-8 items-center justify-center rounded-full text-white font-bold text-xs ${
-                  currentUser.avatarColor || "bg-primary"
-                }`}
-              >
-                {currentUser.avatarInitials}
-              </div>
+              {currentUser.avatarUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={currentUser.avatarUrl}
+                  alt={currentUser.name}
+                  className="h-8 w-8 rounded-full object-cover shrink-0"
+                />
+              ) : (
+                <div
+                  className={`flex h-8 w-8 items-center justify-center rounded-full text-white font-bold text-xs shrink-0 ${
+                    currentUser.avatarColor || "bg-primary"
+                  }`}
+                >
+                  {currentUser.avatarInitials}
+                </div>
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <span className="font-semibold text-xs text-foreground truncate">

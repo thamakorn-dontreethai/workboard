@@ -11,6 +11,7 @@ export interface User {
   password?: string;
   avatarInitials: string;
   avatarColor: string; // Tailwind bg class e.g. "bg-blue-500"
+  avatarUrl?: string | null; // Uploaded profile photo as a data URL, if set
   role: string;
   department?: string;
   isActive: boolean;
