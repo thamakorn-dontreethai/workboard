@@ -316,6 +316,50 @@ const ACTIVE_WORKSPACE_KEY = "workboard_active_workspace_id";
 // the tab is hidden so a background tab doesn't keep polling for nothing.
 const POLL_INTERVAL_MS = 15000;
 
+// ─── Write tracking, so polling can't undo a write that's still landing ──
+// A poll reads the database at the moment its *fetch* goes out. If a write
+// is in flight at that moment, the rows that come back predate it, and
+// applying them wipes the change off the screen until the next tick brings
+// it back — the "add a task, watch it vanish, watch it return" flicker.
+// Neither timestamp alone catches this: the poll's response can arrive
+// before the write's own response does, so the poller also has to be able
+// to ask whether a write is outstanding *right now*.
+let pendingMutations = 0;
+let lastMutationSettledAt = 0;
+let oldestPendingStartedAt = 0;
+// A write that never settles (dropped connection, sleeping laptop) would
+// otherwise hold `pendingMutations` above zero forever and stop the UI ever
+// updating again. After this long, stale data beats frozen data.
+const MAX_WRITE_BLOCK_MS = 30000;
+
+// Every write goes through this instead of fetch(). Reads stay on plain
+// fetch(), as do the periodic check-reminders POSTs — those fire on a timer
+// rather than from anything the user did, and counting them would leave a
+// write permanently "in flight" and starve polling altogether.
+function mutateFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> {
+  if (pendingMutations === 0) oldestPendingStartedAt = Date.now();
+  pendingMutations++;
+  return fetch(input, init).finally(() => {
+    pendingMutations = Math.max(0, pendingMutations - 1);
+    lastMutationSettledAt = Date.now();
+  });
+}
+
+// True when this poll's rows were read before a write that has since landed
+// (or is still landing), and would therefore roll the UI backwards.
+function pollWouldUndoAWrite(fetchStartedAt: number, lastLocalMutationAt: number) {
+  const writeInFlight =
+    pendingMutations > 0 && Date.now() - oldestPendingStartedAt < MAX_WRITE_BLOCK_MS;
+  return (
+    writeInFlight ||
+    lastMutationSettledAt > fetchStartedAt ||
+    lastLocalMutationAt > fetchStartedAt
+  );
+}
+
 // Stand-in for "this user has no workspace at all" (a brand-new,
 // not-yet-invited account, or right after logging out). `id: ""` can
 // never collide with a real workspace id, so anything that filters
@@ -479,13 +523,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           ]);
 
         if (cancelled) return;
-        // A mutation (assign/status/priority/due-date/create/...) landed its
-        // own optimistic update while this fetch was in flight — this
-        // response was already stale the moment it was requested, so
-        // applying it would overwrite the fresher local state and then
-        // "snap back" once the next poll catches up. Skip it; the next
-        // tick will have a fetch that starts after the mutation instead.
-        if (lastLocalMutationAtRef.current > fetchStartedAt) return;
+        // A write (assign/status/priority/due-date/create/delete/...) was
+        // outstanding when these rows were read, so they describe the world
+        // before it. Applying them would wipe the change off the screen
+        // until a later tick put it back. Skip; the next tick's fetch goes
+        // out after the write has landed and carries it.
+        if (pollWouldUndoAWrite(fetchStartedAt, lastLocalMutationAtRef.current)) return;
 
         if (boardsRes?.success && Array.isArray(boardsRes.data)) {
           applyIfChanged("boards", boardsRes.data, setBoards, (d) => d);
@@ -603,7 +646,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         .then((r) => r.json())
         .then((res) => {
           if (cancelled || !res?.success || !Array.isArray(res.workspaces)) return;
-          if (lastLocalMutationAtRef.current > fetchStartedAt) return;
+          if (pollWouldUndoAWrite(fetchStartedAt, lastLocalMutationAtRef.current)) return;
           const list: Workspace[] = res.workspaces;
           applyIfChanged("workspaces", list, setWorkspaces, (d) => d);
           if (list.length > 0) {
@@ -633,7 +676,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         .then((r) => r.json())
         .then((res) => {
           if (cancelled || !res?.success || !Array.isArray(res.data)) return;
-          if (lastLocalMutationAtRef.current > fetchStartedAt) return;
+          if (pollWouldUndoAWrite(fetchStartedAt, lastLocalMutationAtRef.current)) return;
           applyIfChanged("notifications", res.data, setNotifications, (d) =>
             d.map((n: Notification) => ({
               ...n,
@@ -647,7 +690,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         .then((r) => r.json())
         .then((res) => {
           if (cancelled || !res?.success || !Array.isArray(res.data)) return;
-          if (lastLocalMutationAtRef.current > fetchStartedAt) return;
+          if (pollWouldUndoAWrite(fetchStartedAt, lastLocalMutationAtRef.current)) return;
           applyIfChanged("personalTodos", res.data, setPersonalTodos, (d) =>
             d.map((t: PersonalTodo) => ({
               ...t,
@@ -779,7 +822,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(
     async (email: string, password: string): Promise<boolean> => {
       try {
-        const res = await fetch("/api/auth/login", {
+        const res = await mutateFetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password }),
@@ -835,7 +878,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       department?: string;
     }): Promise<{ success: boolean; error?: string }> => {
       try {
-        const res = await fetch("/api/auth/register", {
+        const res = await mutateFetch("/api/auth/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -883,7 +926,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     // Clear the signed session cookie too (it's HttpOnly, so only the server can).
-    fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    mutateFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setIsAuthenticated(false);
     setCurrentUser(DEFAULT_USER);
     // This used to leave `workspace`/`workspaces` untouched, so the next
@@ -966,7 +1009,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       persistState(updatedUsers, workspace, tasks, activities, notifications, updatedUser);
 
       try {
-        const res = await fetch(`/api/users/${currentUser.id}`, {
+        const res = await mutateFetch(`/api/users/${currentUser.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(updates),
@@ -983,7 +1026,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const updateProfile = useCallback(
     async (updates: { name?: string; avatarColor?: string; avatarUrl?: string | null }) => {
       try {
-        const res = await fetch(`/api/users/${currentUser.id}`, {
+        const res = await mutateFetch(`/api/users/${currentUser.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(updates),
@@ -1008,7 +1051,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const changePassword = useCallback(
     async (currentPassword: string, newPassword: string) => {
       try {
-        const res = await fetch("/api/auth/change-password", {
+        const res = await mutateFetch("/api/auth/change-password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ currentPassword, newPassword }),
@@ -1095,7 +1138,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         currentUser
       );
 
-      fetch(`/api/tasks/${taskId}/assign`, {
+      mutateFetch(`/api/tasks/${taskId}/assign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ assigneeIds: newAssigneeIds, actorId: currentUser.id }),
@@ -1200,7 +1243,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         currentUser
       );
 
-      fetch(`/api/tasks/${taskId}`, {
+      mutateFetch(`/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status, groupId: newGroupId, actorId: currentUser.id }),
@@ -1240,7 +1283,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         currentUser
       );
 
-      fetch(`/api/tasks/${taskId}`, {
+      mutateFetch(`/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ priority, actorId: currentUser.id }),
@@ -1278,7 +1321,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         currentUser
       );
 
-      fetch(`/api/tasks/${taskId}`, {
+      mutateFetch(`/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dueDate, groupId: newGroupId, actorId: currentUser.id }),
@@ -1302,7 +1345,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         currentUser
       );
 
-      fetch(`/api/tasks/${taskId}`, {
+      mutateFetch(`/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: value }),
@@ -1326,7 +1369,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         currentUser
       );
 
-      fetch(`/api/tasks/${taskId}`, {
+      mutateFetch(`/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -1361,7 +1404,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         newTaskData.status ||
         (newTaskData.boardId === "board-requests" ? "new_request" : "todo");
 
-      const res = await fetch("/api/tasks", {
+      const res = await mutateFetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1450,7 +1493,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         currentUser
       );
 
-      fetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch((err) =>
+      mutateFetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch((err) =>
         console.error("Failed to delete task:", err)
       );
     },
@@ -1479,7 +1522,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       );
 
       taskIds.forEach((id) => {
-        fetch(`/api/tasks/${id}`, { method: "DELETE" }).catch((err) =>
+        mutateFetch(`/api/tasks/${id}`, { method: "DELETE" }).catch((err) =>
           console.error("Failed to delete task:", err)
         );
       });
@@ -1508,7 +1551,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         currentUser
       );
 
-      fetch(`/api/tasks/${taskId}`, {
+      mutateFetch(`/api/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ groupId: newGroupId, order: newOrder, actorId: currentUser.id }),
@@ -1552,7 +1595,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       );
 
       idsToMove.forEach((id) => {
-        fetch(`/api/tasks/${id}`, {
+        mutateFetch(`/api/tasks/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1579,7 +1622,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         GROUP_COLOR_PALETTE.find((c) => !usedColors.has(c)) ||
         GROUP_COLOR_PALETTE[siblingGroups.length % GROUP_COLOR_PALETTE.length];
 
-      const res = await fetch("/api/groups", {
+      const res = await mutateFetch("/api/groups", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ boardId, name: name.trim() || "New Group", color: nextColor }),
@@ -1632,7 +1675,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         updatedGroups
       );
 
-      fetch(`/api/groups/${groupId}`, {
+      mutateFetch(`/api/groups/${groupId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -1661,7 +1704,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       );
 
       orderedGroupIds.forEach((id, index) => {
-        fetch(`/api/groups/${id}`, {
+        mutateFetch(`/api/groups/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ order: index }),
@@ -1687,7 +1730,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         updatedGroups
       );
 
-      fetch(`/api/groups/${groupId}`, { method: "DELETE" }).catch((err) =>
+      mutateFetch(`/api/groups/${groupId}`, { method: "DELETE" }).catch((err) =>
         console.error("Failed to delete group:", err)
       );
     },
@@ -1704,7 +1747,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         prev.map((g) => (g.id === groupId ? { ...g, isCollapsed } : g))
       );
 
-      fetch(`/api/groups/${groupId}`, {
+      mutateFetch(`/api/groups/${groupId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isCollapsed }),
@@ -1724,7 +1767,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       );
 
       const taskId = subtasks.find((s) => s.id === subtaskId)?.taskId;
-      fetch(`/api/tasks/${taskId || "unknown"}/subtasks`, {
+      mutateFetch(`/api/tasks/${taskId || "unknown"}/subtasks`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ subtaskId }),
@@ -1737,7 +1780,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     async (taskId: string, title: string) => {
       if (!title.trim()) return;
 
-      const res = await fetch(`/api/tasks/${taskId}/subtasks`, {
+      const res = await mutateFetch(`/api/tasks/${taskId}/subtasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim() }),
@@ -1765,7 +1808,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     ) => {
       if (!content.trim() && attachments.length === 0) return;
 
-      const res = await fetch(`/api/tasks/${taskId}/comments`, {
+      const res = await mutateFetch(`/api/tasks/${taskId}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1803,7 +1846,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     async (commentId: string, content: string) => {
       if (!content.trim()) return;
 
-      const res = await fetch(`/api/comments/${commentId}`, {
+      const res = await mutateFetch(`/api/comments/${commentId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: content.trim(), authorId: currentUser.id }),
@@ -1830,7 +1873,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const deleteComment = useCallback(
     async (commentId: string) => {
-      const res = await fetch(
+      const res = await mutateFetch(
         `/api/comments/${commentId}?authorId=${encodeURIComponent(currentUser.id)}`,
         { method: "DELETE" }
       );
@@ -1850,7 +1893,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       role: "owner" | "admin" | "member" | "viewer";
     }) => {
       try {
-        const res = await fetch("/api/users", {
+        const res = await mutateFetch("/api/users", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1883,7 +1926,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           let inviteLink = "";
           if (targetBoardId) {
             try {
-              const inviteRes = await fetch(`/api/boards/${targetBoardId}/invite`, {
+              const inviteRes = await mutateFetch(`/api/boards/${targetBoardId}/invite`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -1986,7 +2029,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
       const updatedMembers = workspace.members.filter((m) => !idSet.has(m.userId));
       try {
-        const res = await fetch(`/api/workspaces/${workspace.id}`, {
+        const res = await mutateFetch(`/api/workspaces/${workspace.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ members: updatedMembers }),
@@ -2017,7 +2060,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
     );
 
-    fetch(`/api/notifications/${id}`, { method: "PATCH" }).catch((err) =>
+    mutateFetch(`/api/notifications/${id}`, { method: "PATCH" }).catch((err) =>
       console.error("Failed to persist notification read state:", err)
     );
   }, []);
@@ -2025,7 +2068,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const markAllNotificationsAsRead = useCallback(() => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
 
-    fetch("/api/notifications", {
+    mutateFetch("/api/notifications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId: currentUser.id }),
@@ -2050,7 +2093,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         Notification.requestPermission().catch(() => {});
       }
 
-      const res = await fetch("/api/todos", {
+      const res = await mutateFetch("/api/todos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2093,7 +2136,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         prev.map((t) => (t.id === id ? { ...t, ...updates, updatedAt: new Date() } : t))
       );
 
-      fetch(`/api/todos/${id}`, {
+      mutateFetch(`/api/todos/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2127,7 +2170,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const deletePersonalTodo = useCallback((id: string) => {
     setPersonalTodos((prev) => prev.filter((t) => t.id !== id));
-    fetch(`/api/todos/${id}`, { method: "DELETE" }).catch((err) =>
+    mutateFetch(`/api/todos/${id}`, { method: "DELETE" }).catch((err) =>
       console.error("Failed to delete to-do:", err)
     );
   }, []);
@@ -2343,7 +2386,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       emailDelivery?: any;
     }> => {
       try {
-        const res = await fetch(`/api/boards/${boardId}/invite`, {
+        const res = await mutateFetch(`/api/boards/${boardId}/invite`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, role, invitedById: currentUser.id }),
@@ -2368,7 +2411,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   const acceptBoardInvite = useCallback(
     async (token: string): Promise<boolean> => {
       try {
-        const res = await fetch(`/api/invitations/${token}/accept`, {
+        const res = await mutateFetch(`/api/invitations/${token}/accept`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
@@ -2471,7 +2514,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         // Best-effort: record the view server-side too, so lastViewedAt is
         // meaningful if it's ever surfaced (e.g. "recently viewed"). Not
         // awaited — switching tabs shouldn't wait on a network round trip.
-        fetch(`/api/workspaces/${workspaceId}`, {
+        mutateFetch(`/api/workspaces/${workspaceId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ lastViewedAt: new Date() }),
@@ -2492,7 +2535,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       icon?: string;
       coverColor?: string;
     }): Promise<Workspace> => {
-      const res = await fetch("/api/workspaces", {
+      const res = await mutateFetch("/api/workspaces", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...data, creatorId: currentUser.id }),
@@ -2517,7 +2560,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const updateWorkspace = useCallback(
     async (workspaceId: string, updates: Partial<Workspace>): Promise<Workspace> => {
-      const res = await fetch(`/api/workspaces/${workspaceId}`, {
+      const res = await mutateFetch(`/api/workspaces/${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -2543,7 +2586,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       // hydration effect), so anyone with only one workspace — the common
       // case — could never delete it. Ending up with zero is fine; it's
       // the same state a freshly-registered, not-yet-invited user is in.
-      const res = await fetch(`/api/workspaces/${workspaceId}`, { method: "DELETE" });
+      const res = await mutateFetch(`/api/workspaces/${workspaceId}`, { method: "DELETE" });
       const result = await res.json();
       if (!result?.success) {
         throw new Error(result?.error || "Failed to delete workspace");
@@ -2574,7 +2617,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const togglePinWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
-      const res = await fetch(`/api/workspaces/${workspaceId}`, {
+      const res = await mutateFetch(`/api/workspaces/${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "togglePin" }),
@@ -2596,7 +2639,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       if (!workspace.id) {
         throw new Error("Create or join a workspace before adding a folder.");
       }
-      const res = await fetch("/api/folders", {
+      const res = await mutateFetch("/api/folders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspaceId: workspace.id, name, color }),
@@ -2621,7 +2664,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       setFolders((prev) =>
         prev.map((f) => (f.id === folderId ? { ...f, ...updates, updatedAt: new Date() } : f))
       );
-      fetch(`/api/folders/${folderId}`, {
+      mutateFetch(`/api/folders/${folderId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -2637,7 +2680,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       setFolders((prev) =>
         prev.map((f) => (f.id === folderId ? { ...f, isCollapsed: nextCollapsed } : f))
       );
-      fetch(`/api/folders/${folderId}`, {
+      mutateFetch(`/api/folders/${folderId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isCollapsed: nextCollapsed }),
@@ -2651,7 +2694,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       setBoards((prev) =>
         prev.map((b) => (b.folderId === folderId ? { ...b, folderId: undefined } : b))
       );
-      fetch(`/api/folders/${folderId}`, {
+      mutateFetch(`/api/folders/${folderId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "empty" }),
@@ -2665,7 +2708,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     setBoards((prev) =>
       prev.map((b) => (b.folderId === folderId ? { ...b, folderId: undefined } : b))
     );
-    fetch(`/api/folders/${folderId}`, { method: "DELETE" }).catch((err) =>
+    mutateFetch(`/api/folders/${folderId}`, { method: "DELETE" }).catch((err) =>
       console.error("Failed to delete folder:", err)
     );
   }, []);
@@ -2679,7 +2722,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       if (!workspace.id) {
         throw new Error("Create or join a workspace before adding a dashboard.");
       }
-      const res = await fetch("/api/dashboards", {
+      const res = await mutateFetch("/api/dashboards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2707,7 +2750,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const deleteDashboard = useCallback((dashboardId: string) => {
     setDashboards((prev) => prev.filter((d) => d.id !== dashboardId));
-    fetch(`/api/dashboards/${dashboardId}`, { method: "DELETE" }).catch((err) =>
+    mutateFetch(`/api/dashboards/${dashboardId}`, { method: "DELETE" }).catch((err) =>
       console.error("Failed to delete dashboard:", err)
     );
   }, []);
@@ -2730,7 +2773,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Create or join a workspace before adding a board.");
       }
 
-      const res = await fetch("/api/boards", {
+      const res = await mutateFetch("/api/boards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2760,7 +2803,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       // so they actually exist in the database and can be assigned, etc.
       const groupResponses = await Promise.all(
         ["#579bfc", "#a25ddc"].map((color) =>
-          fetch("/api/groups", {
+          mutateFetch("/api/groups", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ boardId: createdBoard.id, name: "Group Title", color }),
@@ -2780,7 +2823,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       const taskResponses = await Promise.all(
         starterStatuses.map((status, i) => {
           const group = newGroups[i < 3 ? 0 : 1];
-          return fetch("/api/tasks", {
+          return mutateFetch("/api/tasks", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -2825,7 +2868,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       // is shared with the plain "new board" flow) — patch it in right
       // after if this board was created from inside a folder's menu.
       if (data.folderId) {
-        fetch(`/api/boards/${newBoard.id}`, {
+        mutateFetch(`/api/boards/${newBoard.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ folderId: data.folderId }),
@@ -2852,7 +2895,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (serverDefaultGroupId) {
-        fetch(`/api/groups/${serverDefaultGroupId}`, { method: "DELETE" }).catch(() => {});
+        mutateFetch(`/api/groups/${serverDefaultGroupId}`, { method: "DELETE" }).catch(() => {});
       }
 
       return newBoard;
@@ -2882,7 +2925,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       );
       // JSON.stringify drops `undefined` keys but keeps `null` — pass
       // folderId: null (not undefined) to actually clear it server-side.
-      fetch(`/api/boards/${boardId}`, {
+      mutateFetch(`/api/boards/${boardId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -2893,7 +2936,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const deleteBoard = useCallback((boardId: string) => {
     setBoards((prev) => prev.filter((b) => b.id !== boardId));
-    fetch(`/api/boards/${boardId}`, { method: "DELETE" }).catch((err) =>
+    mutateFetch(`/api/boards/${boardId}`, { method: "DELETE" }).catch((err) =>
       console.error("Failed to delete board:", err)
     );
   }, []);
