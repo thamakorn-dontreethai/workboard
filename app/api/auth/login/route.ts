@@ -7,7 +7,7 @@ import { setSessionCookie } from "@/lib/server/session";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { email, password } = body;
+    const { email, password, rememberMe = true } = body;
 
     if (!email || !password) {
       return NextResponse.json(
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
             message: "Login successful",
             data: safeUser,
           });
-          setSessionCookie(response, user.id);
+          setSessionCookie(response, user.id, rememberMe);
           return response;
         }
       } catch (e) {
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
       message: "Login successful",
       data: safeUser,
     });
-    setSessionCookie(response, localUser.id);
+    setSessionCookie(response, localUser.id, rememberMe);
     return response;
   } catch (error: any) {
     return NextResponse.json(

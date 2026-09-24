@@ -42,6 +42,7 @@ export function TaskModal() {
     subtasks,
     comments,
     activities,
+    loadTaskActivities,
     currentUser,
     assignTask,
     updateTaskStatus,
@@ -61,6 +62,13 @@ export function TaskModal() {
 
   const taskSubtasks = subtasks.filter((s) => s.taskId === activeTaskId);
   const taskComments = comments.filter((c) => c.taskId === activeTaskId);
+  // The bulk hydration only carries the newest activities, so ask for
+  // this task's own history when it opens — otherwise an older task shows
+  // a timeline that simply stops partway.
+  useEffect(() => {
+    if (activeTaskId) loadTaskActivities(activeTaskId);
+  }, [activeTaskId, loadTaskActivities]);
+
   const taskActivities = activities.filter((a) => a.taskId === activeTaskId);
 
   // Local state for editing title and description

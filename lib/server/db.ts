@@ -2184,7 +2184,12 @@ export async function toggleSubtask(id: string): Promise<Subtask | null> {
 
 export async function getActivities(
   taskId?: string,
-  boardId?: string
+  boardId?: string,
+  // The unfiltered list is the single biggest thing the client downloads on
+  // every poll, and the only place that reads all of it shows the newest
+  // handful. Callers that need one task's full history pass taskId, which
+  // is never capped.
+  limit?: number
 ): Promise<Activity[]> {
   if (isPrismaEnabled) {
     try {
@@ -2194,6 +2199,7 @@ export async function getActivities(
           ...(boardId && { boardId }),
         },
         orderBy: { createdAt: "desc" },
+        ...(limit && limit > 0 ? { take: limit } : {}),
       });
       // An empty array is a legitimate answer, not a signal to fall back.
       return acts.map((a) => ({
@@ -2217,7 +2223,8 @@ export async function getActivities(
   } else if (boardId) {
     list = list.filter((a) => a.boardId === boardId);
   }
-  return list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const sorted = list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  return limit && limit > 0 ? sorted.slice(0, limit) : sorted;
 }
 
 export async function getNotifications(

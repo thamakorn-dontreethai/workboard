@@ -2,14 +2,23 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Settings, LogOut, ShieldCheck } from "lucide-react";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 
 export function UserMenu() {
+  const router = useRouter();
   const { currentUser, workspace, openInviteMemberModal, logout } =
     useWorkBoard();
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const handleSignOut = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsOpen(false);
+    logout();
+    router.replace("/login");
+  };
 
   const currentMember = workspace.members.find(
     (m) => m.userId === currentUser.id
@@ -124,15 +133,15 @@ export function UserMenu() {
               <span>Account Settings</span>
             </Link>
 
-            <Link
-              href="/login"
-              onClick={() => setIsOpen(false)}
+            <button
+              type="button"
+              onClick={handleSignOut}
               role="menuitem"
-              className="w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors font-medium"
+              className="w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors font-medium text-left cursor-pointer"
             >
               <LogOut className="h-3.5 w-3.5 text-rose-400" />
               <span>Sign Out</span>
-            </Link>
+            </button>
           </div>
         </div>
       )}

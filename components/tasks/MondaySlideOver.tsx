@@ -50,6 +50,7 @@ export function MondaySlideOver() {
     subtasks,
     comments,
     activities,
+    loadTaskActivities,
     currentUser,
     assignTask,
     updateTaskStatus,
@@ -74,6 +75,13 @@ export function MondaySlideOver() {
   const taskComments = comments
     .filter((c) => c.taskId === activeTaskId)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  // The bulk hydration only carries the newest activities, so ask for
+  // this task's own history when it opens — otherwise an older task shows
+  // a timeline that simply stops partway.
+  useEffect(() => {
+    if (activeTaskId) loadTaskActivities(activeTaskId);
+  }, [activeTaskId, loadTaskActivities]);
+
   const taskActivities = activities.filter((a) => a.taskId === activeTaskId);
 
   // People that can be @mentioned: the board's team, falling back to

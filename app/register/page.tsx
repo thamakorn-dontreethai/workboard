@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, Suspense } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
@@ -23,7 +23,7 @@ function RegisterForm() {
   const initialEmail = searchParams.get("email") || "";
   const initialRole = searchParams.get("role") || "Workspace Owner";
 
-  const { register } = useWorkBoard();
+  const { register, isAuthenticated, isHydrated } = useWorkBoard();
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState(initialEmail);
@@ -32,6 +32,13 @@ function RegisterForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // If already authenticated, redirect immediately
+  useEffect(() => {
+    if (isHydrated && isAuthenticated) {
+      router.replace(redirect);
+    }
+  }, [isHydrated, isAuthenticated, redirect, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,14 +56,19 @@ function RegisterForm() {
     setError(null);
 
     try {
+      const cleanEmail = email.trim();
       const res = await register({
         name: name.trim(),
-        email: email.trim(),
+        email: cleanEmail,
         password,
         role,
       });
 
       if (res.success) {
+        try {
+          localStorage.setItem("workboard_remembered_email", cleanEmail);
+          localStorage.setItem("workboard_remember_me", "true");
+        } catch {}
         router.push(redirect);
       } else {
         setError(res.error || "Registration failed. Please try another email.");

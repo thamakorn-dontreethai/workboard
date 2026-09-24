@@ -60,6 +60,12 @@ interface WorkBoardContextType {
   subtasks: Subtask[];
   comments: Comment[];
   activities: Activity[];
+  /**
+   * Pulls one task's full activity history into `activities`. The bulk list
+   * is capped to the newest entries to keep the payload small, so anything
+   * showing a single task's whole timeline has to ask for it.
+   */
+  loadTaskActivities: (taskId: string) => void;
   notifications: Notification[];
   unreadNotificationCount: number;
 
@@ -100,7 +106,7 @@ interface WorkBoardContextType {
   // Auth & Session
   isAuthenticated: boolean;
   isHydrated: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<boolean>;
   register: (userData: {
     name: string;
     email: string;
@@ -510,7 +516,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         // known — see the per-user effect below. Fetching them here
         // unconditionally used to return every workspace in the database,
         // including ones this user was never invited to.
-        const [boardsRes, groupsRes, tasksRes, commentsRes, subtasksRes, activitiesRes, foldersRes, dashboardsRes] =
+        const [boardsRes, groupsRes, tasksRes, commentsRes, subtasksRes, activitiesRes, foldersRes, dashboardsRes, usersRes] =
           await Promise.all([
             fetchSlice("/api/boards"),
             fetchSlice("/api/groups"),
@@ -520,6 +526,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
             fetchSlice("/api/activities"),
             fetchSlice("/api/folders"),
             fetchSlice("/api/dashboards"),
+            fetchSlice("/api/users"),
           ]);
 
         if (cancelled) return;
@@ -596,6 +603,17 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
               ...a,
               createdAt: new Date(a.createdAt),
             }))
+          );
+        }
+
+        // Hydrate workspace members (users) from the database so that
+        // invited members show up after a page refresh or when opening
+        // from a different browser — previously they were only ever read
+        // back from localStorage, which only knew about users that had
+        // been invited/logged-in in *this* browser session.
+        if (usersRes?.success && Array.isArray(usersRes.data)) {
+          applyIfChanged("users", usersRes.data, setUsers, (d) =>
+            d.filter(isRealUser)
           );
         }
       } catch (err) {
@@ -759,15 +777,19 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         const parsed = JSON.parse(saved);
 
         // Restore authentication state
-        if (parsed.isAuthenticated && parsed.currentUserId) {
+        if (parsed.isAuthenticated && (parsed.currentUser || parsed.currentUserId)) {
           const cleanUsers = (parsed.users || []).filter(isRealUser);
-          const foundUser = cleanUsers.find(
-            (u: User) => u.id === parsed.currentUserId
-          );
-          if (foundUser) {
-            setCurrentUser(foundUser);
+          const userToRestore =
+            (parsed.currentUser && isRealUser(parsed.currentUser))
+              ? parsed.currentUser
+              : cleanUsers.find((u: User) => u.id === parsed.currentUserId);
+          if (userToRestore) {
+            setCurrentUser(userToRestore);
             setIsAuthenticated(true);
-            if (cleanUsers.length > 0) setUsers(cleanUsers);
+            const mergedUsers = cleanUsers.some((u: User) => u.id === userToRestore.id)
+              ? cleanUsers
+              : [userToRestore, ...cleanUsers];
+            if (mergedUsers.length > 0) setUsers(mergedUsers);
           }
         }
         // Workspaces, boards, groups, tasks, comments, subtasks,
@@ -809,6 +831,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           JSON.stringify({
             isAuthenticated: authenticated ?? true,
             currentUserId: currUser.id,
+            currentUser: currUser,
             users: newUsers,
           })
         );
@@ -820,12 +843,12 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   );
 
   const login = useCallback(
-    async (email: string, password: string): Promise<boolean> => {
+    async (email: string, password: string, rememberMe: boolean = true): Promise<boolean> => {
       try {
         const res = await mutateFetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ email, password, rememberMe }),
         });
         const data = await res.json();
         if (data.success && data.data) {
@@ -859,6 +882,32 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
           // Persist auth session to localStorage
           persistState(newUsers, updatedWorkspace, tasks, activities, notifications, loggedInUser, groups, boards, true);
+
+          try {
+            if (rememberMe) {
+              localStorage.setItem(
+                "workboard_remembered_user",
+                JSON.stringify({
+                  id: loggedInUser.id,
+                  name: loggedInUser.name,
+                  email: loggedInUser.email,
+                  avatarInitials: loggedInUser.avatarInitials,
+                  avatarColor: loggedInUser.avatarColor,
+                  avatarUrl: loggedInUser.avatarUrl,
+                  role: loggedInUser.role,
+                })
+              );
+              localStorage.setItem("workboard_remembered_email", loggedInUser.email);
+              localStorage.setItem("workboard_remember_me", "true");
+            } else {
+              localStorage.removeItem("workboard_remembered_user");
+              localStorage.removeItem("workboard_remembered_email");
+              localStorage.setItem("workboard_remember_me", "false");
+            }
+          } catch {
+            // ignore
+          }
+
           return true;
         }
         return false;
@@ -961,16 +1010,28 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     [users]
   );
 
-  // The browser remembers "logged in" in localStorage, but API permissions
-  // come from a signed cookie. If the two disagree (e.g. a login from before
-  // the cookie existed, or an expired one), sign out so the person logs in
-  // again instead of hitting silent "not allowed" errors.
+  // Session verification:
+  // Query /api/auth/session to ensure the user has a valid signed HttpOnly cookie.
+  // If valid, restore their server profile and mark authenticated.
+  // If the cookie is expired / 401, clear any stale local authentication.
   useEffect(() => {
-    if (!isAuthenticated) return;
     let cancelled = false;
     fetch("/api/auth/session")
-      .then((res) => {
-        if (!cancelled && res.status === 401) logout();
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.success && data?.data) {
+            const serverUser: User = data.data;
+            setCurrentUser(serverUser);
+            setIsAuthenticated(true);
+            setUsers((prev) =>
+              prev.some((u) => u.id === serverUser.id) ? prev : [...prev, serverUser]
+            );
+          }
+        } else if (res.status === 401) {
+          if (isAuthenticated) logout();
+        }
       })
       .catch(() => {
         // Offline / transient — keep the local session; the API still guards writes.
@@ -1022,6 +1083,38 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
     },
     [currentUser, users, workspace, tasks, activities, notifications, persistState]
   );
+
+  // Fetches one task's complete activity history and folds it into the
+  // shared list. The bulk hydration only carries the newest entries — an
+  // older task opened in the slide-over would otherwise show a timeline
+  // that just stops. Merged by id so the poll's copies don't duplicate.
+  const loadedTaskActivitiesRef = useRef<Set<string>>(new Set());
+  const loadTaskActivities = useCallback((taskId: string) => {
+    if (!taskId || loadedTaskActivitiesRef.current.has(taskId)) return;
+    loadedTaskActivitiesRef.current.add(taskId);
+    fetch(`/api/activities?taskId=${encodeURIComponent(taskId)}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (!res?.success || !Array.isArray(res.data)) return;
+        const fetched: Activity[] = res.data.map((a: Activity) => ({
+          ...a,
+          createdAt: new Date(a.createdAt),
+        }));
+        if (fetched.length === 0) return;
+        setActivities((prev) => {
+          const seen = new Set(prev.map((a) => a.id));
+          const missing = fetched.filter((a) => !seen.has(a.id));
+          if (missing.length === 0) return prev;
+          return [...prev, ...missing].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+        });
+      })
+      .catch(() => {
+        // Let it be retried the next time the task is opened.
+        loadedTaskActivitiesRef.current.delete(taskId);
+      });
+  }, []);
 
   const updateProfile = useCallback(
     async (updates: { name?: string; avatarColor?: string; avatarUrl?: string | null }) => {
@@ -3018,6 +3111,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       subtasks,
       comments,
       activities,
+      loadTaskActivities,
       notifications,
       unreadNotificationCount,
 
@@ -3154,6 +3248,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       subtasks,
       comments,
       activities,
+      loadTaskActivities,
       notifications,
       unreadNotificationCount,
       switchWorkspace,

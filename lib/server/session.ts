@@ -10,6 +10,7 @@ import type { NextResponse } from "next/server";
 
 export const SESSION_COOKIE = "wb_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+const SESSION_SHORT_TTL_SECONDS = 60 * 60 * 24; // 1 day
 
 function getSecret(): string {
   if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
@@ -26,9 +27,9 @@ function sign(payload: string): string {
   return crypto.createHmac("sha256", getSecret()).update(payload).digest("base64url");
 }
 
-export function createSessionToken(userId: string, now = Date.now()): string {
+export function createSessionToken(userId: string, now = Date.now(), ttl = SESSION_TTL_SECONDS): string {
   const payload = Buffer.from(
-    JSON.stringify({ uid: userId, exp: Math.floor(now / 1000) + SESSION_TTL_SECONDS })
+    JSON.stringify({ uid: userId, exp: Math.floor(now / 1000) + ttl })
   ).toString("base64url");
   return `${payload}.${sign(payload)}`;
 }
@@ -65,13 +66,14 @@ export function getSessionUserId(request: Request): string | null {
   return null;
 }
 
-export function setSessionCookie(response: NextResponse, userId: string): void {
-  response.cookies.set(SESSION_COOKIE, createSessionToken(userId), {
+export function setSessionCookie(response: NextResponse, userId: string, rememberMe = true): void {
+  const ttl = rememberMe ? SESSION_TTL_SECONDS : SESSION_SHORT_TTL_SECONDS;
+  response.cookies.set(SESSION_COOKIE, createSessionToken(userId, Date.now(), ttl), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: SESSION_TTL_SECONDS,
+    maxAge: ttl,
   });
 }
 

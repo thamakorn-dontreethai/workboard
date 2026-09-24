@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { Sidebar } from "../sidebar/Sidebar";
+import { AppSkeleton } from "./AppSkeleton";
 import { Header } from "../header/Header";
 import { WorkBoardProvider, useWorkBoard } from "@/lib/context/WorkBoardContext";
 import { MondaySlideOver } from "@/components/tasks/MondaySlideOver";
@@ -108,7 +109,15 @@ function AppShellInner({ children }: AppShellProps) {
     );
   }
 
-  // Show nothing while redirecting to login
+  // Until hydration finishes we don't yet know whether there's a session, so
+  // this is "still loading", not "logged out" — showing the skeleton rather
+  // than nothing is the difference between a loading screen and a blank one
+  // on a slow connection.
+  if (!isHydrated) {
+    return <AppSkeleton />;
+  }
+
+  // Hydrated and genuinely signed out: the redirect above is on its way.
   if (!isAuthenticated) {
     return null;
   }
