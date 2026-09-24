@@ -18,7 +18,7 @@ export default function ClearStoragePage() {
     router.replace("/login");
   }, [router]);
   return (
-    <div className="flex h-screen items-center justify-center text-white bg-[#111322]">
+    <div className="flex h-viewport items-center justify-center text-white bg-[#111322]">
       <p>Clearing session...</p>
     </div>
   );

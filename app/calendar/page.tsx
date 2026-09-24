@@ -13,7 +13,7 @@ import {
   PersonalTodo,
   WorkspaceAppointment,
 } from "@/types";
-import { formatDate, isOverdue } from "@/lib/utils/date";
+import { formatDate, isOverdue, formatTimeRange } from "@/lib/utils/date";
 import { getThaiHolidayForDate, ThaiHoliday } from "@/lib/utils/thaiHolidays";
 import { PRIORITY_ICON } from "@/lib/utils/task";
 import {
@@ -296,6 +296,7 @@ export default function CalendarPage() {
       const all: WorkspaceAppointment[] = results.flat().map((a: any) => ({
         ...a,
         startAt: new Date(a.startAt),
+        endAt: a.endAt ? new Date(a.endAt) : null,
         createdAt: new Date(a.createdAt),
         updatedAt: new Date(a.updatedAt),
       }));
@@ -887,7 +888,7 @@ export default function CalendarPage() {
                                 e.stopPropagation();
                                 router.push(`/workspace/${appt.workspaceId}?tab=calendar`);
                               }}
-                              title={`${appt.title} (Workspace Appointment) at ${appt.startAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+                              title={`${appt.title} (Workspace Appointment) at ${formatTimeRange(appt.startAt, appt.endAt)}`}
                               className="group/chip flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] truncate border border-dashed bg-emerald-950/20 border-emerald-700/40 text-emerald-200 hover:border-emerald-500 transition-all"
                             >
                               <CalendarCheck2 className="h-3 w-3 shrink-0" />
@@ -1277,7 +1278,7 @@ export default function CalendarPage() {
                               </p>
                               <span className="flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5">
                                 <Clock className="h-3 w-3" />
-                                {appt.startAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                {formatTimeRange(appt.startAt, appt.endAt)}
                                 {apptWorkspace ? ` · ${apptWorkspace.name}` : ""}
                                 {creator ? ` · by ${creator.name}` : ""}
                               </span>

@@ -87,7 +87,7 @@ export default function AcceptInvitePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#111322] flex items-center justify-center text-white">
+      <div className="min-h-viewport bg-[#111322] flex items-center justify-center text-white">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
           <p className="text-sm text-zinc-400">กำลังตรวจสอบคำเชิญเข้าร่วมโครงการ...</p>
@@ -110,7 +110,7 @@ export default function AcceptInvitePage() {
   const registerLink = `/register?redirect=${encodeURIComponent(`/invite/${token}`)}&email=${encodeURIComponent(invitedEmail)}`;
 
   return (
-    <div className="min-h-screen bg-[#111322] flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden font-sans text-zinc-100 selection:bg-blue-600 selection:text-white">
+    <div className="min-h-viewport bg-[#111322] flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden font-sans text-zinc-100 selection:bg-blue-600 selection:text-white">
       {/* Background ambient lighting */}
       <div className="absolute top-[-15%] left-[-10%] w-[500px] h-[500px] rounded-full bg-blue-600/10 blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-15%] right-[-10%] w-[500px] h-[500px] rounded-full bg-emerald-600/10 blur-[120px] pointer-events-none" />

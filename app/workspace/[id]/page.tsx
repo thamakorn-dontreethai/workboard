@@ -50,7 +50,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import type { Post, WorkspaceFile, WorkspaceAppointment } from "@/types";
-import { formatDate, isOverdue } from "@/lib/utils/date";
+import { formatDate, isOverdue, formatTimeRange } from "@/lib/utils/date";
 import { getThaiHolidayForDate } from "@/lib/utils/thaiHolidays";
 
 import { CoverColorPicker } from "@/components/workspace/CoverColorPicker";
@@ -368,6 +368,7 @@ export default function WorkspacePage() {
   const [newApptTitle, setNewApptTitle] = useState("");
   const [newApptNotes, setNewApptNotes] = useState("");
   const [newApptTime, setNewApptTime] = useState("09:00");
+  const [newApptEndTime, setNewApptEndTime] = useState("10:00");
   const [newApptReminder, setNewApptReminder] = useState(30);
   const [newApptAttendeeIds, setNewApptAttendeeIds] = useState<string[]>([]);
   const [apptFormError, setApptFormError] = useState<string | null>(null);
@@ -384,6 +385,7 @@ export default function WorkspacePage() {
           res.data.map((a: WorkspaceAppointment) => ({
             ...a,
             startAt: new Date(a.startAt),
+            endAt: a.endAt ? new Date(a.endAt) : null,
             createdAt: new Date(a.createdAt),
             updatedAt: new Date(a.updatedAt),
           }))
@@ -438,6 +440,21 @@ export default function WorkspacePage() {
       hh || 0,
       mm || 0
     );
+    let endAt: Date | null = null;
+    if (newApptEndTime) {
+      const [eh, em] = newApptEndTime.split(":").map(Number);
+      endAt = new Date(
+        selectedDay.getFullYear(),
+        selectedDay.getMonth(),
+        selectedDay.getDate(),
+        eh || 0,
+        em || 0
+      );
+      // An end before the start means it runs past midnight into the next
+      // day. Equal times are left alone — that's a zero-length entry, not a
+      // 24-hour one.
+      if (endAt < startAt) endAt.setDate(endAt.getDate() + 1);
+    }
     try {
       setApptFormError(null);
       const res = await fetch("/api/appointments", {
@@ -449,6 +466,7 @@ export default function WorkspacePage() {
           title: newApptTitle.trim(),
           notes: newApptNotes.trim(),
           startAt: startAt.toISOString(),
+          endAt: endAt ? endAt.toISOString() : null,
           attendeeIds: newApptAttendeeIds,
           reminderMinutesBefore: newApptReminder,
         }),
@@ -458,6 +476,7 @@ export default function WorkspacePage() {
       const created: WorkspaceAppointment = {
         ...result.data,
         startAt: new Date(result.data.startAt),
+        endAt: result.data.endAt ? new Date(result.data.endAt) : null,
         createdAt: new Date(result.data.createdAt),
         updatedAt: new Date(result.data.updatedAt),
       };
@@ -468,6 +487,7 @@ export default function WorkspacePage() {
       setNewApptTitle("");
       setNewApptNotes("");
       setNewApptTime("09:00");
+      setNewApptEndTime("10:00");
       setNewApptReminder(30);
       setNewApptAttendeeIds([]);
     } catch (err: any) {
@@ -1618,7 +1638,7 @@ export default function WorkspacePage() {
                                 title={a.title}
                                 className="truncate rounded bg-emerald-950/40 border border-emerald-700/30 px-1 py-0.5 text-[8.5px] sm:text-[9.5px] text-emerald-200"
                               >
-                                {a.startAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{" "}
+                                {formatTimeRange(a.startAt, a.endAt)}{" "}
                                 {a.title}
                               </div>
                             ))}
@@ -1672,6 +1692,7 @@ export default function WorkspacePage() {
                         setNewApptTitle("");
                         setNewApptNotes("");
                         setNewApptTime("09:00");
+                        setNewApptEndTime("10:00");
                         setNewApptReminder(30);
                         setNewApptAttendeeIds([]);
                         setIsCreatingAppointment(true);
@@ -1714,10 +1735,7 @@ export default function WorkspacePage() {
                                     {a.title}
                                   </p>
                                   <p className="text-[10px] text-muted-foreground">
-                                    {a.startAt.toLocaleTimeString([], {
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    })}
+                                    {formatTimeRange(a.startAt, a.endAt)}
                                     {creator ? ` · ${creator.name}` : ""}
                                   </p>
                                   {a.notes && (
@@ -2046,15 +2064,26 @@ export default function WorkspacePage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
-                  <Clock className="h-3 w-3" /> Time
+                  <Clock className="h-3 w-3" /> Start
                 </label>
                 <input
                   type="time"
                   value={newApptTime}
                   onChange={(e) => setNewApptTime(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-muted/90 px-2.5 py-2 text-sm text-foreground focus:outline-none focus:border-[#0073ea]"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                  <Clock className="h-3 w-3" /> End
+                </label>
+                <input
+                  type="time"
+                  value={newApptEndTime}
+                  onChange={(e) => setNewApptEndTime(e.target.value)}
                   className="w-full rounded-lg border border-border bg-muted/90 px-2.5 py-2 text-sm text-foreground focus:outline-none focus:border-[#0073ea]"
                 />
               </div>

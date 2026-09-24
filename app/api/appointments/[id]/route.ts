@@ -12,6 +12,8 @@ export async function PATCH(
     if (body.title !== undefined) updates.title = body.title;
     if (body.notes !== undefined) updates.notes = body.notes;
     if (body.startAt !== undefined) updates.startAt = new Date(body.startAt);
+    // null clears the end time; a value sets it.
+    if (body.endAt !== undefined) updates.endAt = body.endAt ? new Date(body.endAt) : null;
     if (body.attendeeIds !== undefined) updates.attendeeIds = body.attendeeIds;
     if (body.reminderMinutesBefore !== undefined)
       updates.reminderMinutesBefore = body.reminderMinutesBefore;

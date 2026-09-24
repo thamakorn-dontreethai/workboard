@@ -136,3 +136,17 @@ export function getInitials(name: string): string {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
+
+/**
+ * "14:00" for an appointment with no end time, "14:00 - 15:30" with one.
+ * Rendered in the viewer's own timezone — unlike the server-side reminder
+ * formatting, which has to pin Asia/Bangkok because Vercel's clock is UTC.
+ */
+export function formatTimeRange(startAt: Date, endAt?: Date | null): string {
+  const fmt = (d: Date) =>
+    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const start = fmt(startAt);
+  if (!endAt) return start;
+  const end = fmt(new Date(endAt));
+  return `${start} - ${end}`;
+}

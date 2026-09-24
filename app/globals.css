@@ -128,3 +128,77 @@
     @apply font-sans;
   }
 }
+/* ─── Mobile (iOS / Android) ────────────────────────────────────────────── */
+
+/* iOS Safari counts the space behind its collapsible address bar as part of
+   100vh, so a 100vh shell with overflow-hidden renders taller than what you
+   can actually see and its bottom row sits permanently off-screen. 100dvh
+   tracks the visible height instead; the 100vh line stays first as the
+   fallback for browsers that don't know dvh. */
+/* The two-declaration fallback gets optimised away by the CSS compiler, so
+   the older unit is kept behind an @supports test it can't collapse. */
+.h-viewport {
+  height: 100vh;
+}
+@supports (height: 100dvh) {
+  .h-viewport {
+    height: 100dvh;
+  }
+}
+
+/* Padding that keeps content clear of the notch, the rounded corners and the
+   home indicator. Needs viewport-fit=cover (set in layout.tsx) to be
+   anything other than zero, so it costs nothing on devices without them. */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.safe-inset-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+@media (max-width: 767px) {
+  /* iOS zooms the whole page in when you focus a field whose text is under
+     16px, and never zooms back out — which is why tapping a login field left
+     the form half off-screen. Raising just the control's own font size on
+     phones fixes it at the source; every label, button and surrounding style
+     keeps the size it was designed at, and desktop is untouched. */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  /* Anything the browser renders at a fixed 16px can still overflow a narrow
+     phone; let long words and URLs wrap rather than forcing a sideways
+     scroll of the whole page. */
+  body {
+    overflow-wrap: break-word;
+  }
+}
+
+/* Rotating an iPhone to landscape otherwise inflates body text on its own,
+   which breaks layouts that were sized deliberately. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* The grey box Android/iOS flash over every tapped element looks like a
+   rendering glitch next to the app's own hover and focus states. Focus
+   rings are untouched, so keyboard and screen-reader users lose nothing. */
+@media (hover: none) {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Same dvh reasoning as .h-viewport, for pages that grow past one screen. */
+.min-h-viewport {
+  min-height: 100vh;
+}
+@supports (height: 100dvh) {
+  .min-h-viewport {
+    min-height: 100dvh;
+  }
+}

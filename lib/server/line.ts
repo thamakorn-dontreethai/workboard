@@ -66,56 +66,45 @@ export function buildTaskLink(taskId: string): string {
   return `${getSiteUrl()}/my-work?taskId=${encodeURIComponent(taskId)}`;
 }
 
-export interface TaskFlexMessageOptions {
+export interface FlexCardRow {
+  label: string;
+  value: string;
+  valueColor?: string;
+  bold?: boolean;
+}
+
+export interface FlexCardOptions {
   headerColor: string;
   headerLabel: string;
   emoji: string;
-  taskTitle: string;
-  boardName?: string;
-  dueLabel?: string;
-  statusNote?: string;
+  title: string;
+  rows?: FlexCardRow[];
   link: string;
+  linkLabel: string;
   altText: string;
 }
 
-// A LINE "Flex Message" bubble — a small card with a colored header, the
-// task's details, and a button straight into the app — reads as an actual
+// A LINE "Flex Message" bubble — a small card with a colored header, a few
+// labelled rows, and a button straight into the app — reads as an actual
 // notification from a real system instead of a loose line of plain text.
-export function buildTaskFlexMessage(opts: TaskFlexMessageOptions) {
-  const detailRows: any[] = [];
-  if (opts.boardName) {
-    detailRows.push({
-      type: "box",
-      layout: "baseline",
-      spacing: "sm",
-      contents: [
-        { type: "text", text: "บอร์ด", size: "xs", color: "#71717A", flex: 2 },
-        { type: "text", text: opts.boardName, size: "xs", color: "#3F3F46", flex: 5, wrap: true },
-      ],
-    });
-  }
-  if (opts.dueLabel) {
-    detailRows.push({
-      type: "box",
-      layout: "baseline",
-      spacing: "sm",
-      contents: [
-        { type: "text", text: "กำหนดส่ง", size: "xs", color: "#71717A", flex: 2 },
-        { type: "text", text: opts.dueLabel, size: "xs", color: "#3F3F46", flex: 5, wrap: true },
-      ],
-    });
-  }
-  if (opts.statusNote) {
-    detailRows.push({
-      type: "box",
-      layout: "baseline",
-      spacing: "sm",
-      contents: [
-        { type: "text", text: "สถานะ", size: "xs", color: "#71717A", flex: 2 },
-        { type: "text", text: opts.statusNote, size: "xs", color: "#E11D48", flex: 5, weight: "bold", wrap: true },
-      ],
-    });
-  }
+export function buildFlexCard(opts: FlexCardOptions) {
+  const detailRows = (opts.rows ?? []).map((r) => ({
+    type: "box",
+    layout: "baseline",
+    spacing: "sm",
+    contents: [
+      { type: "text", text: r.label, size: "xs", color: "#71717A", flex: 2 },
+      {
+        type: "text",
+        text: r.value,
+        size: "xs",
+        color: r.valueColor ?? "#3F3F46",
+        flex: 5,
+        ...(r.bold ? { weight: "bold" } : {}),
+        wrap: true,
+      },
+    ],
+  }));
 
   return {
     type: "flex",
@@ -155,7 +144,7 @@ export function buildTaskFlexMessage(opts: TaskFlexMessageOptions) {
         contents: [
           {
             type: "text",
-            text: opts.taskTitle,
+            text: opts.title,
             weight: "bold",
             size: "lg",
             wrap: true,
@@ -176,7 +165,7 @@ export function buildTaskFlexMessage(opts: TaskFlexMessageOptions) {
             style: "primary",
             height: "sm",
             color: opts.headerColor,
-            action: { type: "uri", label: "ดูรายละเอียดงาน", uri: opts.link },
+            action: { type: "uri", label: opts.linkLabel, uri: opts.link },
           },
         ],
       },
@@ -185,11 +174,123 @@ export function buildTaskFlexMessage(opts: TaskFlexMessageOptions) {
   };
 }
 
+export interface TaskFlexMessageOptions {
+  headerColor: string;
+  headerLabel: string;
+  emoji: string;
+  taskTitle: string;
+  boardName?: string;
+  dueLabel?: string;
+  statusNote?: string;
+  link: string;
+  altText: string;
+}
+
+export function buildTaskFlexMessage(opts: TaskFlexMessageOptions) {
+  const rows: FlexCardRow[] = [];
+  if (opts.boardName) rows.push({ label: "บอร์ด", value: opts.boardName });
+  if (opts.dueLabel) rows.push({ label: "กำหนดส่ง", value: opts.dueLabel });
+  if (opts.statusNote) {
+    rows.push({
+      label: "สถานะ",
+      value: opts.statusNote,
+      valueColor: "#E11D48",
+      bold: true,
+    });
+  }
+  return buildFlexCard({
+    headerColor: opts.headerColor,
+    headerLabel: opts.headerLabel,
+    emoji: opts.emoji,
+    title: opts.taskTitle,
+    rows,
+    link: opts.link,
+    linkLabel: "ดูรายละเอียดงาน",
+    altText: opts.altText,
+  });
+}
+
 export async function sendLineTaskNotification(
   lineUserId: string,
   opts: TaskFlexMessageOptions
 ): Promise<LineSendResult> {
   return pushMessages(lineUserId, [buildTaskFlexMessage(opts)]);
+}
+
+export function buildBoardLink(boardId: string): string {
+  return `${getSiteUrl()}/board/${encodeURIComponent(boardId)}`;
+}
+
+export function buildCalendarLink(): string {
+  return `${getSiteUrl()}/calendar`;
+}
+
+export interface AppointmentReminderOptions {
+  title: string;
+  dateLabel: string;
+  /** Already formatted in Asia/Bangkok — e.g. "14:00 - 15:30 น." */
+  timeRangeLabel: string;
+  workspaceName?: string;
+  notes?: string;
+}
+
+// The calendar's counterpart to the task reminders: fires at the appointment's
+// reminder window for every attendee who has LINE linked.
+export async function sendLineAppointmentReminder(
+  lineUserId: string,
+  opts: AppointmentReminderOptions
+): Promise<LineSendResult> {
+  const rows: FlexCardRow[] = [
+    { label: "วันที่", value: opts.dateLabel },
+    { label: "เวลา", value: opts.timeRangeLabel, valueColor: "#0073EA", bold: true },
+  ];
+  if (opts.workspaceName) rows.push({ label: "Workspace", value: opts.workspaceName });
+  if (opts.notes) rows.push({ label: "หมายเหตุ", value: opts.notes });
+
+  return pushMessages(lineUserId, [
+    buildFlexCard({
+      headerColor: "#7C3AED",
+      headerLabel: "เตือนนัดหมาย",
+      emoji: "📅",
+      title: opts.title,
+      rows,
+      link: buildCalendarLink(),
+      linkLabel: "เปิดปฏิทิน",
+      altText: `เตือนนัดหมาย: ${opts.title} ${opts.timeRangeLabel}`,
+    }),
+  ]);
+}
+
+export interface MemberJoinedOptions {
+  memberName: string;
+  memberEmail?: string;
+  boardName?: string;
+  boardId: string;
+}
+
+// Sent to whoever issued the invitation, once the person they invited has
+// actually accepted it — the invite itself is fire-and-forget email, so
+// without this the inviter has no way to tell whether it was taken up.
+export async function sendLineMemberJoinedNotification(
+  lineUserId: string,
+  opts: MemberJoinedOptions
+): Promise<LineSendResult> {
+  const rows: FlexCardRow[] = [];
+  if (opts.boardName) rows.push({ label: "บอร์ด", value: opts.boardName });
+  if (opts.memberEmail) rows.push({ label: "อีเมล", value: opts.memberEmail });
+
+  return pushMessages(lineUserId, [
+    buildFlexCard({
+      headerColor: "#16A34A",
+      headerLabel: "สมาชิกที่คุณเชิญเข้าร่วมแล้ว",
+      emoji: "🎉",
+      title: opts.memberName,
+      rows,
+      link: buildBoardLink(opts.boardId),
+      linkLabel: "เปิดบอร์ด",
+      altText: `${opts.memberName} เข้าร่วมบอร์ดที่คุณเชิญแล้ว`,
+    }),
+  ]);
 }
 
 export async function replyLineMessage(replyToken: string, text: string): Promise<void> {

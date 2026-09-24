@@ -37,6 +37,7 @@ export async function POST(request: Request) {
       title: body.title,
       notes: body.notes || "",
       startAt: new Date(body.startAt),
+      endAt: body.endAt ? new Date(body.endAt) : null,
       attendeeIds: Array.isArray(body.attendeeIds) ? body.attendeeIds : [],
       reminderMinutesBefore: body.reminderMinutesBefore,
     });

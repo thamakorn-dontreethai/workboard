@@ -8,6 +8,8 @@ import {
   generateLineLinkCode,
   LINE_LINK_CODE_TTL_MS,
   sendLineTaskNotification,
+  sendLineMemberJoinedNotification,
+  sendLineAppointmentReminder,
   buildTaskLink,
 } from "./line";
 import type { CommentAttachment } from "@/types";
@@ -796,7 +798,7 @@ export async function deleteBoard(id: string): Promise<boolean> {
     try {
       await prisma.board.update({
         where: { id },
-        data: { isArchived: true },
+        data: { isArchived: true, archivedAt: new Date() },
       });
       prismaSuccess = true;
     } catch (e) {
@@ -1659,7 +1661,7 @@ export async function deleteTask(id: string): Promise<boolean> {
     try {
       await prisma.task.update({
         where: { id },
-        data: { isArchived: true },
+        data: { isArchived: true, archivedAt: new Date() },
       });
     } catch (e) {
       console.warn("Prisma deleteTask fallback:", e);
@@ -1673,6 +1675,72 @@ export async function deleteTask(id: string): Promise<boolean> {
   db.tasks[idx].isArchived = true;
   writeDb(db);
   return true;
+}
+
+// ─── Retention: permanently clear the bin ───────────────────────────────────
+// "Delete" in this app archives rather than removes (see deleteTask /
+// deleteBoard), which is what makes an undo possible but also means nothing
+// ever leaves the tables. This drops the rows that have sat archived past
+// the retention window for good.
+//
+// It is a real delete, and the schema cascades: removing a task takes its
+// subtasks, comments and activities with it; removing a board takes its
+// groups, tasks and everything under those. That is the intent — but it is
+// why the job only ever touches rows whose archivedAt is genuinely older
+// than the cutoff, and never rows that are merely archived.
+export const ARCHIVE_RETENTION_DAYS = Number(process.env.ARCHIVE_RETENTION_DAYS || 30);
+
+export interface PurgeResult {
+  cutoff: Date;
+  retentionDays: number;
+  tasks: number;
+  boards: number;
+  dryRun: boolean;
+}
+
+export async function purgeArchived(options?: {
+  retentionDays?: number;
+  dryRun?: boolean;
+}): Promise<PurgeResult> {
+  const retentionDays = options?.retentionDays ?? ARCHIVE_RETENTION_DAYS;
+  const dryRun = options?.dryRun ?? false;
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+
+  if (!isPrismaEnabled) {
+    return { cutoff, retentionDays, tasks: 0, boards: 0, dryRun };
+  }
+
+  // archivedAt is null on anything archived before that column existed. Those
+  // rows fall back to updatedAt, which for an archived row is the moment it
+  // was archived — nothing touches a row again once it's out of every query.
+  const expired = {
+    isArchived: true,
+    OR: [
+      { archivedAt: { lt: cutoff } },
+      { AND: [{ archivedAt: null }, { updatedAt: { lt: cutoff } }] },
+    ],
+  };
+
+  if (dryRun) {
+    const [tasks, boards] = await Promise.all([
+      prisma.task.count({ where: expired }),
+      prisma.board.count({ where: expired }),
+    ]);
+    return { cutoff, retentionDays, tasks, boards, dryRun };
+  }
+
+  // Boards first: a board takes its tasks with it, so counting tasks after
+  // that would double-count the ones that went along for the ride.
+  const boards = await prisma.board.deleteMany({ where: expired });
+  const tasks = await prisma.task.deleteMany({ where: expired });
+
+  return {
+    cutoff,
+    retentionDays,
+    tasks: tasks.count,
+    boards: boards.count,
+    dryRun,
+  };
 }
 
 // ─── Comments Operations ────────────────────────────────────────────────────
@@ -2921,6 +2989,7 @@ function mapAppointmentRow(row: {
   title: string;
   notes: string | null;
   startAt: Date;
+  endAt?: Date | null;
   attendeeIds: string[];
   reminderMinutesBefore: number;
   isCompleted: boolean;
@@ -2936,6 +3005,7 @@ function mapAppointmentRow(row: {
     title: row.title,
     notes: row.notes || "",
     startAt: row.startAt,
+    endAt: row.endAt ?? null,
     attendeeIds: row.attendeeIds || [],
     reminderMinutesBefore: row.reminderMinutesBefore,
     isCompleted: row.isCompleted,
@@ -2966,6 +3036,7 @@ export async function createAppointment(data: {
   title: string;
   notes?: string;
   startAt: Date;
+  endAt?: Date | null;
   attendeeIds?: string[];
   reminderMinutesBefore?: number;
 }): Promise<WorkspaceAppointment> {
@@ -2980,6 +3051,7 @@ export async function createAppointment(data: {
       title: data.title,
       notes: data.notes || "",
       startAt: data.startAt,
+      endAt: data.endAt ?? null,
       attendeeIds: data.attendeeIds || [],
       reminderMinutesBefore: data.reminderMinutesBefore ?? 30,
     },
@@ -2992,7 +3064,13 @@ export async function updateAppointment(
   updates: Partial<
     Pick<
       WorkspaceAppointment,
-      "title" | "notes" | "startAt" | "attendeeIds" | "reminderMinutesBefore" | "isCompleted"
+      | "title"
+      | "notes"
+      | "startAt"
+      | "endAt"
+      | "attendeeIds"
+      | "reminderMinutesBefore"
+      | "isCompleted"
     >
   >
 ): Promise<WorkspaceAppointment | null> {
@@ -3069,10 +3147,10 @@ export async function checkAndSendAppointmentReminders(
     if (claim.count === 0) continue;
 
     const attendeeIds = appt.attendeeIds.length > 0 ? appt.attendeeIds : memberIds;
-    const startLabel = appt.startAt.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    // Formatted in Asia/Bangkok — this runs on Vercel, whose clock is UTC,
+    // so the old zone-less toLocaleTimeString printed the time 7 hours off.
+    const timeRangeLabel = bangkokTimeRangeLabel(appt.startAt, appt.endAt);
+    const dateLabel = bangkokDateLabel(appt.startAt);
 
     for (const attendeeId of attendeeIds) {
       const user = usersById.get(attendeeId);
@@ -3085,7 +3163,7 @@ export async function checkAndSendAppointmentReminders(
             userId: attendeeId,
             type: "appointment_reminder",
             title: `Upcoming: ${appt.title}`,
-            body: `Starts at ${startLabel}`,
+            body: `${dateLabel} ${timeRangeLabel}`,
             taskId: null,
             boardId: appt.boardId,
           },
@@ -3113,6 +3191,19 @@ export async function checkAndSendAppointmentReminders(
         notes: appt.notes || undefined,
         startAt: appt.startAt,
       }).catch((e) => console.warn("Failed to send appointment reminder email:", e));
+
+      // Same reminder over LINE, for attendees who linked their account.
+      // Skipped silently for everyone else, exactly like the task reminders.
+      const lineUserId = (user as any).lineUserId as string | null;
+      if (lineUserId) {
+        sendLineAppointmentReminder(lineUserId, {
+          title: appt.title,
+          dateLabel,
+          timeRangeLabel,
+          workspaceName: workspaceRow.name,
+          notes: appt.notes || undefined,
+        }).catch((e) => console.warn("Failed to send appointment LINE reminder:", e));
+      }
     }
 
     const updated = await prisma.appointment.findUnique({ where: { id: appt.id } });
@@ -3149,6 +3240,24 @@ function bangkokDateKey(date: Date): string {
     month: "2-digit",
     day: "2-digit",
   }).format(date);
+}
+
+function bangkokTimeLabel(date: Date): string {
+  return date.toLocaleTimeString("th-TH", {
+    timeZone: BANGKOK_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+// "14:00 - 15:30 น.", or just "14:00 น." when no end time was given.
+// Formatted in Asia/Bangkok on purpose: this runs server-side on Vercel,
+// whose clock is UTC, so leaving the zone out printed times seven hours off
+// — the same trap the task reminders above document.
+export function bangkokTimeRangeLabel(startAt: Date, endAt?: Date | null): string {
+  const start = bangkokTimeLabel(startAt);
+  if (!endAt) return `${start} น.`;
+  return `${start} - ${bangkokTimeLabel(endAt)} น.`;
 }
 
 function bangkokDateLabel(date: Date): string {
@@ -3689,5 +3798,57 @@ export async function acceptBoardInvitation(
   inv.acceptedAt = inv.acceptedAt || new Date();
   writeDb(db);
 
+  // Tell whoever sent the invitation that it was taken up. An invite goes
+  // out as email and then goes quiet, so without this the inviter — usually
+  // the person who needs to know, e.g. a lead adding someone to their team
+  // — has no signal that the person actually joined. Runs once: an
+  // already-accepted invitation is rejected further up.
+  if (inv.invitedById && inv.invitedById !== targetUser.id) {
+    await notifyInviterOfAcceptance(inv, board, targetUser);
+  }
+
   return { success: true, board, user: targetUser };
+}
+
+// Best-effort on both channels: joining the board is what matters, so a
+// failure to notify is logged and swallowed rather than failing the accept.
+async function notifyInviterOfAcceptance(
+  inv: BoardInvitation,
+  board: Board,
+  joiner: User
+): Promise<void> {
+  if (!isPrismaEnabled) return;
+  try {
+    const inviter = await prisma.user.findUnique({
+      where: { id: inv.invitedById },
+      select: { id: true, lineUserId: true },
+    });
+    if (!inviter) return;
+
+    await prisma.notification
+      .create({
+        data: {
+          // Deterministic, so a retried accept can't stack duplicates.
+          id: `notif-joined-${inv.id}`,
+          userId: inviter.id,
+          type: "member_joined",
+          title: "Invitation accepted",
+          body: `${joiner.name} joined "${board.name}"`,
+          taskId: null,
+          boardId: board.id,
+        },
+      })
+      .catch(() => {});
+
+    if (inviter.lineUserId) {
+      await sendLineMemberJoinedNotification(inviter.lineUserId, {
+        memberName: joiner.name,
+        memberEmail: joiner.email,
+        boardName: board.name,
+        boardId: board.id,
+      }).catch(() => {});
+    }
+  } catch (e) {
+    console.warn("Failed to notify inviter of acceptance:", e);
+  }
 }

@@ -245,7 +245,8 @@ export type NotificationType =
   | "appointment_reminder"
   | "post_like"
   | "post_comment"
-  | "new_post";
+  | "new_post"
+  | "member_joined";
 
 export interface Notification {
   id: ID;
@@ -311,6 +312,7 @@ export interface WorkspaceAppointment {
   title: string;
   notes?: string;
   startAt: Date;
+  endAt?: Date | null;
   attendeeIds: ID[]; // empty = every current workspace member
   reminderMinutesBefore: number;
   isCompleted: boolean;

@@ -102,7 +102,7 @@ function AppShellInner({ children }: AppShellProps) {
   // If on Login or Register page, show clean standalone full-screen page
   if (isAuthPage) {
     return (
-      <div className="h-screen w-screen overflow-y-auto bg-[#111322] text-foreground">
+      <div className="h-viewport w-full overflow-y-auto overflow-x-hidden bg-[#111322] text-foreground safe-inset-x">
         {children}
       </div>
     );
@@ -114,7 +114,7 @@ function AppShellInner({ children }: AppShellProps) {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+    <div className="flex h-viewport w-full overflow-hidden bg-background text-foreground">
       {/* 1. Desktop & Tablet Sidebar (Persistent) */}
       <div className="hidden md:flex h-full shrink-0">
         <Sidebar
@@ -139,7 +139,7 @@ function AppShellInner({ children }: AppShellProps) {
           />
 
           {/* Drawer content sliding from left */}
-          <div className="relative flex w-72 max-w-[85vw] flex-col bg-sidebar shadow-2xl z-10 animate-in slide-in-from-left duration-200">
+          <div className="relative flex h-viewport w-72 max-w-[85vw] flex-col bg-sidebar shadow-2xl z-10 animate-in slide-in-from-left duration-200 pb-safe">
             {/* Close button inside drawer */}
             <button
               type="button"
@@ -167,7 +167,7 @@ function AppShellInner({ children }: AppShellProps) {
 
         <main
           role="main"
-          className="flex-1 overflow-y-auto overflow-x-hidden bg-background"
+          className="flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain bg-background pb-safe safe-inset-x"
         >
           {children}
         </main>

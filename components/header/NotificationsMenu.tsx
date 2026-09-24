@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { Bell, CheckCheck, Inbox, Check, ArrowRight, Settings, X, ThumbsUp, MessageSquare, Megaphone } from "lucide-react";
+import { Bell, CheckCheck, Inbox, Check, ArrowRight, Settings, X, ThumbsUp, MessageSquare, Megaphone, UserPlus } from "lucide-react";
 import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 import { formatDate } from "@/lib/utils/date";
 
@@ -44,6 +44,8 @@ function getNotifIcon(type: string) {
       return MessageSquare;
     case "new_post":
       return Megaphone;
+    case "member_joined":
+      return UserPlus;
     default:
       return Bell;
   }

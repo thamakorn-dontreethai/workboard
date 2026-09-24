@@ -88,6 +88,7 @@ model Board {
   ownerId      String
   owner        User       @relation("BoardOwner", fields: [ownerId], references: [id])
   memberIds    String[]   @default([])
+  archivedAt   DateTime?
   isArchived   Boolean    @default(false)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -199,6 +200,9 @@ model Task {
   overdueReminderSentAt DateTime?
   category    String     @default("General")
   order       Int        @default(0)
+  // Set when the row is soft-deleted, so the retention job knows how long
+  // it has been sitting in the bin. Null on rows that are still live.
+  archivedAt   DateTime?
   isArchived  Boolean    @default(false)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
@@ -335,6 +339,9 @@ model Appointment {
   title                 String
   notes                 String?   @default("")
   startAt               DateTime
+  // Optional: appointments created before this column existed have no end
+  // time, and a quick note-to-self doesn't need one either.
+  endAt                 DateTime?
   // Empty = every current workspace member is an attendee.
   attendeeIds           String[]  @default([])
   reminderMinutesBefore Int       @default(30)
