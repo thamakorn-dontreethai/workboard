@@ -148,6 +148,7 @@ interface WorkBoardContextType {
   clearLastCreatedTaskId: () => void;
   deleteTask: (taskId: string) => void;
   deleteTasks: (taskIds: string[]) => void;
+  moveTaskToPosition: (taskId: string, targetGroupId: string, targetIndex: number) => void;
   moveTaskToGroup: (taskId: string, newGroupId: string) => void;
   moveTasksToGroup: (taskIds: string[], newGroupId: string) => void;
   voteItem: (taskId: string) => void;
@@ -1497,26 +1498,96 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         newTaskData.status ||
         (newTaskData.boardId === "board-requests" ? "new_request" : "todo");
 
-      const res = await mutateFetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: newTaskData.title.trim(),
-          description: newTaskData.description || "",
-          boardId: newTaskData.boardId,
-          groupId: newTaskData.groupId,
-          assigneeIds: newTaskData.assigneeIds || [],
-          priority: newTaskData.priority || "medium",
-          status,
-          dueDate: newTaskData.dueDate || null,
-          category: newTaskData.category || "General",
-          reporterId: currentUser.id,
-        }),
-      });
-      const result = await res.json();
+      // Paint the row first, ask the server second. Waiting for the round
+      // trip meant several seconds of nothing at all happening after the
+      // click — every other mutation here (assign, status, priority) has
+      // always updated first and reconciled after, and this one stood out
+      // badly for it. The real record replaces this placeholder below; the
+      // poll can't overwrite it in the meantime because mutateFetch marks a
+      // write as in flight (see pollWouldUndoAWrite).
+      const tempId = `temp-task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const now = new Date();
+      const nextOrderInGroup =
+        tasks
+          .filter((t) => t.groupId === newTaskData.groupId && !t.isArchived)
+          .reduce((max, t) => Math.max(max, t.order), -1) + 1;
+      const optimisticTask: Task = {
+        id: tempId,
+        // Filled in by the server, which owns the numbering.
+        itemCode: "",
+        boardId: newTaskData.boardId,
+        groupId: newTaskData.groupId,
+        title: newTaskData.title.trim(),
+        description: newTaskData.description || "",
+        status,
+        priority: newTaskData.priority || "medium",
+        assigneeIds: newTaskData.assigneeIds || [],
+        reporterId: currentUser.id,
+        dueDate: newTaskData.dueDate || null,
+        category: newTaskData.category || "General",
+        timeline: newTaskData.timeline || null,
+        votes: 0,
+        tags: newTaskData.tags || [],
+        subtaskIds: [],
+        commentIds: [],
+        attachmentIds: [],
+        activityIds: [],
+        // Land the placeholder where the server is going to put it — at the
+        // end of its group — so the row doesn't visibly jump when the real
+        // record arrives.
+        order: nextOrderInGroup,
+        isArchived: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const optimisticActivity: Activity = {
+        id: `act-${Date.now()}`,
+        taskId: tempId,
+        boardId: newTaskData.boardId,
+        actorId: currentUser.id,
+        type: "task_created",
+        description: "created this item",
+        createdAt: now,
+      };
+
+      setTasks((prev) => [...prev, optimisticTask]);
+      setActivities((prev) => [optimisticActivity, ...prev]);
+      setLastCreatedTaskId(tempId);
+
+      let result: { success?: boolean; data?: Task; error?: string } | null = null;
+      try {
+        const res = await mutateFetch("/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: newTaskData.title.trim(),
+            description: newTaskData.description || "",
+            boardId: newTaskData.boardId,
+            groupId: newTaskData.groupId,
+            assigneeIds: newTaskData.assigneeIds || [],
+            priority: newTaskData.priority || "medium",
+            status,
+            dueDate: newTaskData.dueDate || null,
+            category: newTaskData.category || "General",
+            reporterId: currentUser.id,
+          }),
+        });
+        result = await res.json();
+      } catch (err) {
+        // Network died: take the placeholder back off the screen rather than
+        // leaving a row behind that no longer exists anywhere.
+        setTasks((prev) => prev.filter((t) => t.id !== tempId));
+        setActivities((prev) => prev.filter((a) => a.id !== optimisticActivity.id));
+        throw err;
+      }
+
       if (!result?.success || !result?.data) {
+        setTasks((prev) => prev.filter((t) => t.id !== tempId));
+        setActivities((prev) => prev.filter((a) => a.id !== optimisticActivity.id));
         throw new Error(result?.error || "Failed to create task");
       }
+
       // The server doesn't persist timeline/tags/votes (no columns for them
       // yet) — keep them client-side on top of the server's real record so
       // the UI doesn't regress while that's still a gap.
@@ -1530,23 +1601,22 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         tags: newTaskData.tags || [],
       };
 
-      const updatedTasks = [newTask, ...tasks];
+      // Swap the placeholder for the real record in place, so the row keeps
+      // its position instead of jumping.
+      let updatedTasks: Task[] = [];
+      setTasks((prev) => {
+        updatedTasks = prev.map((t) => (t.id === tempId ? newTask : t));
+        return updatedTasks;
+      });
+      let updatedActivities: Activity[] = [];
+      setActivities((prev) => {
+        updatedActivities = prev.map((a) =>
+          a.id === optimisticActivity.id ? { ...a, taskId: newTask.id } : a
+        );
+        return updatedActivities;
+      });
+      setLastCreatedTaskId((prev) => (prev === tempId ? newTask.id : prev));
 
-      const newActivity: Activity = {
-        id: `act-${Date.now()}`,
-        taskId: newTask.id,
-        boardId: newTask.boardId,
-        actorId: currentUser.id,
-        type: "task_created",
-        description: "created this item",
-        createdAt: new Date(),
-      };
-
-      const updatedActivities = [newActivity, ...activities];
-
-      setTasks(updatedTasks);
-      setActivities(updatedActivities);
-      setLastCreatedTaskId(newTask.id);
       persistState(
         users,
         workspace,
@@ -1557,15 +1627,10 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       );
       return newTask;
     },
-    [
-      tasks,
-      currentUser,
-      activities,
-      notifications,
-      users,
-      workspace,
-      persistState,
-    ]
+    // `tasks` is needed to work out the next order value in the group;
+    // `activities` isn't read at all any more (the updates above use the
+    // functional form of setState).
+    [tasks, currentUser, notifications, users, workspace, persistState]
   );
 
   const clearLastCreatedTaskId = useCallback(() => {
@@ -1621,6 +1686,69 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       });
     },
     [tasks, activeTaskId, users, workspace, activities, notifications, currentUser, persistState]
+  );
+
+  // Drops a task at a specific position, in its own group or another one,
+  // and renumbers that group so every row has a distinct order value. The
+  // board sorts on `order`, so this is what makes a manual arrangement stick
+  // instead of the rows falling back to whatever sequence the data arrived
+  // in. Only the tasks whose number actually changed are sent to the server.
+  const moveTaskToPosition = useCallback(
+    (taskId: string, targetGroupId: string, targetIndex: number) => {
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task) return;
+
+      const byOrder = (a: Task, b: Task) =>
+        a.order - b.order ||
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+
+      const siblings = tasks
+        .filter((t) => t.groupId === targetGroupId && !t.isArchived && t.id !== taskId)
+        .sort(byOrder);
+
+      const index = Math.max(0, Math.min(targetIndex, siblings.length));
+      const arranged = [...siblings.slice(0, index), task, ...siblings.slice(index)];
+
+      const orderById = new Map(arranged.map((t, i) => [t.id, i]));
+      const changed = arranged.filter(
+        (t) => t.order !== orderById.get(t.id) || t.id === taskId
+      );
+      if (changed.length === 0) return;
+
+      const updatedTasks = tasks.map((t) => {
+        const newOrder = orderById.get(t.id);
+        if (newOrder === undefined) return t;
+        if (t.id === taskId) {
+          return { ...t, groupId: targetGroupId, order: newOrder, updatedAt: new Date() };
+        }
+        return t.order === newOrder ? t : { ...t, order: newOrder };
+      });
+      setTasks(updatedTasks);
+      persistState(
+        users,
+        workspace,
+        updatedTasks,
+        activities,
+        notifications,
+        currentUser
+      );
+
+      for (const t of changed) {
+        const body: Record<string, unknown> = {
+          order: orderById.get(t.id),
+          actorId: currentUser.id,
+        };
+        if (t.id === taskId && task.groupId !== targetGroupId) {
+          body.groupId = targetGroupId;
+        }
+        mutateFetch(`/api/tasks/${t.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }).catch((err) => console.error("Failed to persist row order:", err));
+      }
+    },
+    [tasks, users, workspace, activities, notifications, currentUser, persistState]
   );
 
   const moveTaskToGroup = useCallback(
@@ -3157,6 +3285,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       clearLastCreatedTaskId,
       deleteTask,
       deleteTasks,
+      moveTaskToPosition,
       moveTaskToGroup,
       moveTasksToGroup,
       voteItem,
@@ -3315,6 +3444,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       clearLastCreatedTaskId,
       deleteTask,
       deleteTasks,
+      moveTaskToPosition,
       moveTaskToGroup,
       moveTasksToGroup,
       voteItem,

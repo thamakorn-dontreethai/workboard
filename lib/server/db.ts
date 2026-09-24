@@ -261,6 +261,62 @@ export async function getWorkspace(userId?: string): Promise<Workspace | undefin
   return list[0];
 }
 
+// Board plus the workspace it belongs to, in one query.
+//
+// Every permission check needs both, and fetching them separately means two
+// sequential round trips — the workspace lookup can't even start until the
+// board comes back with its workspaceId. On a slow database link that pair
+// was costing well over a second before the request did any actual work.
+// Prisma resolves the relation server-side, so this is one trip.
+export async function getBoardWithWorkspace(
+  id: string
+): Promise<{ board: Board; workspace: Workspace | undefined } | undefined> {
+  if (isPrismaEnabled) {
+    try {
+      const b = await prisma.board.findUnique({
+        where: { id },
+        include: { groups: { select: { id: true } }, workspace: true },
+      });
+      if (b && !b.isArchived) {
+        const rawMemberIds = (b as any).memberIds;
+        const memberIds =
+          Array.isArray(rawMemberIds) && rawMemberIds.length > 0
+            ? rawMemberIds
+            : [b.ownerId];
+        return {
+          board: {
+            id: b.id,
+            workspaceId: b.workspaceId,
+            folderId: (b as any).folderId || undefined,
+            name: b.name,
+            description: b.description || "",
+            type: (b.type as any) || "general",
+            color: b.color,
+            ownerId: b.ownerId,
+            memberIds,
+            groupIds: b.groups.map((g) => g.id),
+            isArchived: b.isArchived,
+            createdAt: b.createdAt,
+            updatedAt: b.updatedAt,
+            lastViewedAt: b.lastViewedAt,
+          },
+          workspace: b.workspace ? mapWorkspaceRow(b.workspace) : undefined,
+        };
+      }
+      // Deliberately falls through rather than returning "not found" here:
+      // getBoardById answers an archived board out of the local JSON file,
+      // and callers of this function must behave identically to the pair of
+      // calls it replaces. Diverging would quietly change who gets a 404.
+    } catch (e) {
+      console.warn("Prisma getBoardWithWorkspace fallback:", e);
+    }
+  }
+
+  const board = await getBoardById(id);
+  if (!board) return undefined;
+  return { board, workspace: await getWorkspaceById(board.workspaceId) };
+}
+
 export async function getWorkspaceById(id: string): Promise<Workspace | undefined> {
   if (isPrismaEnabled) {
     try {
@@ -1142,7 +1198,10 @@ export async function getTasks(filter?: {
       // for the ride, which is what made this list take the better part of a
       // minute; the four parallel queries land in a couple of seconds.
       const [tasks, subtaskRefs, commentRefs, activityRefs] = await Promise.all([
-        prisma.task.findMany({ where, orderBy: { order: "asc" } }),
+        // createdAt breaks ties: rows that share an order value would
+        // otherwise come back in whatever sequence Postgres felt like,
+        // which is what made the table look like it reshuffled itself.
+        prisma.task.findMany({ where, orderBy: [{ order: "asc" }, { createdAt: "asc" }] }),
         prisma.subtask.findMany({ select: { id: true, taskId: true } }),
         prisma.comment.findMany({ select: { id: true, taskId: true } }),
         prisma.activity.findMany({ select: { id: true, taskId: true } }),
@@ -1279,7 +1338,25 @@ export async function createTask(data: {
       : "WB";
 
   const num = Math.floor(Math.random() * 900) + 100;
+
+  // Where the new row sits in its group. This used to count the tasks in the
+  // local JSON file — which stopped reflecting anything real once Postgres
+  // became the source of truth, so every new task came out with order 0, 1
+  // or 2 and rows with equal order shuffled around on each load. Half the
+  // tasks in the database ended up sharing an order value with a sibling.
   const groupTasks = db.tasks.filter((t) => t.groupId === data.groupId);
+  let order = groupTasks.length;
+  if (isPrismaEnabled) {
+    try {
+      const highest = await prisma.task.aggregate({
+        _max: { order: true },
+        where: { groupId: data.groupId, isArchived: false },
+      });
+      order = (highest._max.order ?? -1) + 1;
+    } catch (e) {
+      console.warn("Prisma next-order lookup fallback:", e);
+    }
+  }
 
   const newTask: Task = {
     id: `task-${Date.now()}`,
@@ -1299,7 +1376,7 @@ export async function createTask(data: {
     commentIds: [],
     attachmentIds: [],
     activityIds: [],
-    order: groupTasks.length,
+    order,
     isArchived: false,
     createdAt: new Date(),
     updatedAt: new Date(),

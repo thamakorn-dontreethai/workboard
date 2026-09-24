@@ -3,6 +3,7 @@ import type { Board, Task } from "@/types";
 import { getSessionUserId } from "./session";
 import {
   getBoardById,
+  getBoardWithWorkspace,
   getWorkspaceById,
   getTaskById,
   getGroups,
@@ -49,10 +50,13 @@ export async function authorizeBoard(
   const session = requireSession(request);
   if (!session.ok) return session;
 
-  const board = await getBoardById(boardId);
-  if (!board) return deny(404, "Board not found");
+  // One query for both, rather than the board and then its workspace in
+  // sequence — see getBoardWithWorkspace.
+  const found = await getBoardWithWorkspace(boardId);
+  if (!found) return deny(404, "Board not found");
+  const { board, workspace } = found;
 
-  const role = await getBoardRole(session.userId, board);
+  const role = resolveBoardRole(session.userId, board, workspace);
   if (!roleCan(role, action, task, session.userId)) {
     return deny(
       403,

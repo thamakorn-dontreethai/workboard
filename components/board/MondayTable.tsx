@@ -109,6 +109,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
     reorderGroups,
     openTaskModal,
     comments,
+    moveTaskToPosition,
   } = useWorkBoard();
 
   const boardGroups = groups
@@ -138,6 +139,12 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
   const rowMenuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  // Where the dragged row would land: the group under the pointer and the
+  // index within it. Drives the drop indicator line and the actual move.
+  const [dropTarget, setDropTarget] = useState<{
+    groupId: string;
+    index: number;
+  } | null>(null);
   const [groupMenuId, setGroupMenuId] = useState<string | null>(null);
   const groupMenuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
@@ -278,6 +285,32 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
   // it; drop it on another group's box to move it there.
   const DRAG_THRESHOLD_PX = 5;
 
+  // Which slot in `groupId` the pointer is currently over. Rows are measured
+  // from the DOM rather than tracked in state so this stays correct while the
+  // list scrolls under the cursor mid-drag. Above a row's midpoint means
+  // "insert before it", below means "after".
+  const resolveDropTarget = (
+    groupId: string,
+    clientY: number,
+    excludeTaskId?: string
+  ): { groupId: string; index: number } => {
+    const rows = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        `[data-drop-group-id="${CSS.escape(groupId)}"] [data-drop-task-id]`
+      )
+    ).filter((el) => el.dataset.dropTaskId !== excludeTaskId);
+
+    let index = rows.length;
+    for (let i = 0; i < rows.length; i++) {
+      const rect = rows[i].getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) {
+        index = i;
+        break;
+      }
+    }
+    return { groupId, index };
+  };
+
   const handleRowPointerDown = (
     e: React.PointerEvent<HTMLElement>,
     task: Task
@@ -310,7 +343,9 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
       }
       const hoveredEl = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
       const groupEl = hoveredEl?.closest<HTMLElement>("[data-drop-group-id]");
-      setDragOverGroupId(groupEl?.dataset.dropGroupId ?? null);
+      const groupId = groupEl?.dataset.dropGroupId ?? null;
+      setDragOverGroupId(groupId);
+      setDropTarget(groupId ? resolveDropTarget(groupId, moveEvent.clientY) : null);
     };
 
     // pointerup/pointercancel are the only events that reliably signal the
@@ -325,10 +360,14 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
         const droppedEl = document.elementFromPoint(upEvent.clientX, upEvent.clientY);
         const groupEl = droppedEl?.closest<HTMLElement>("[data-drop-group-id]");
         const targetGroupId = groupEl?.dataset.dropGroupId;
-        if (targetGroupId) moveTaskToGroup(task.id, targetGroupId);
+        if (targetGroupId) {
+          const target = resolveDropTarget(targetGroupId, upEvent.clientY, task.id);
+          moveTaskToPosition(task.id, targetGroupId, target.index);
+        }
       }
       setDraggingTaskId(null);
       setDragOverGroupId(null);
+      setDropTarget(null);
     };
 
     document.addEventListener("pointermove", handlePointerMove);
@@ -534,7 +573,14 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
       case "title":
         return [...list].sort((a, b) => a.title.localeCompare(b.title) * dir);
       default:
-        return [...list].sort((a, b) => a.order - b.order);
+        // Manual order. createdAt is the tie-break so rows that happen to
+        // share an order value keep a fixed, predictable position instead of
+        // swapping places between renders.
+        return [...list].sort(
+          (a, b) =>
+            a.order - b.order ||
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
     }
   };
 
@@ -548,6 +594,20 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
     <div className="space-y-8 pb-16 select-none font-sans">
       {boardGroups.map((group) => {
         const groupTasks = getGroupTasks(group.id);
+
+        // The row the drop indicator sits above, and whether the drop would
+        // land past the last row instead (where there is no row to mark).
+        const rowsExcludingDragged = groupTasks.filter((t) => t.id !== draggingTaskId);
+        const isDropGroup = Boolean(
+          draggingTaskId && dropTarget && dropTarget.groupId === group.id
+        );
+        const dropIndicatorTaskId = isDropGroup
+          ? rowsExcludingDragged[dropTarget!.index]?.id ?? null
+          : null;
+        const dropAtEndTaskId =
+          isDropGroup && dropTarget!.index >= rowsExcludingDragged.length
+            ? rowsExcludingDragged[rowsExcludingDragged.length - 1]?.id ?? null
+            : null;
 
         const isDropBefore =
           groupDropTarget?.groupId === group.id && groupDropTarget.position === "before";
@@ -962,6 +1022,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                       return (
                         <tr
                           key={task.id}
+                          data-drop-task-id={task.id}
                           ref={(el) => {
                             rowRefs.current[task.id] = el;
                           }}
@@ -986,6 +1047,15 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                               : isSelected
                               ? "bg-accent"
                               : "hover:bg-accent/50"
+                          } ${
+                            // Where the row would land if dropped now: a line
+                            // above the row it would push down, or below the
+                            // last row when it would go to the end.
+                            dropIndicatorTaskId === task.id
+                              ? "shadow-[inset_0_2px_0_0_var(--color-primary)]"
+                              : dropAtEndTaskId === task.id
+                              ? "shadow-[inset_0_-2px_0_0_var(--color-primary)]"
+                              : ""
                           }`}
                         >
                           {/* Left colored border */}
