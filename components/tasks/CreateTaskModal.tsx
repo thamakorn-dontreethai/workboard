@@ -94,19 +94,22 @@ export function CreateTaskModal() {
     e.preventDefault();
     if (!title.trim() || !boardId || !groupId) return;
 
-    try {
-      const newTask = await createTask({
-        title: title.trim(),
-        description: description.trim(),
-        boardId,
-        groupId,
-        assigneeIds,
-        priority,
-        orderDate: orderDateStr ? new Date(orderDateStr) : null,
-        dueDate: dueDateStr ? new Date(dueDateStr) : null,
-      });
+    // createTask paints the row right away and saves in the background, so
+    // close the form now instead of holding it open for the round trip.
+    const pending = createTask({
+      title: title.trim(),
+      description: description.trim(),
+      boardId,
+      groupId,
+      assigneeIds,
+      priority,
+      orderDate: orderDateStr ? new Date(orderDateStr) : null,
+      dueDate: dueDateStr ? new Date(dueDateStr) : null,
+    });
+    closeCreateTaskModal();
 
-      closeCreateTaskModal();
+    try {
+      const newTask = await pending;
       openTaskModal(newTask.id);
     } catch (error) {
       console.error("Failed to create task:", error);

@@ -410,9 +410,8 @@ export default function CalendarPage() {
 
   // Helper to schedule an unscheduled task to the selected date
   const handleScheduleTask = (taskId: string, targetDate: Date) => {
-    // Changing a due date is leader-only.
     const task = tasks.find((t) => t.id === taskId);
-    if (!task || !canDo("manage", task.boardId)) return;
+    if (!task || !canDo("schedule", task.boardId)) return;
     updateTaskDueDate(taskId, targetDate);
   };
 

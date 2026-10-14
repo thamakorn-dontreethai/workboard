@@ -357,11 +357,14 @@ describe("Role-based permissions", () => {
     expect(leaderDel.status).toBe(200);
   });
 
-  it("lets only leaders set priority / due date / title", async () => {
+  it("lets members set dates but only leaders set priority / title", async () => {
     const taskId = await newTask({ assigneeIds: [MEMBER] });
 
     expect((await patchTask(taskId, MEMBER, { priority: "urgent" })).status).toBe(403);
-    expect((await patchTask(taskId, MEMBER, { dueDate: "2030-01-01" })).status).toBe(403);
+    expect((await patchTask(taskId, MEMBER, { dueDate: "2030-01-01" })).status).toBe(200);
+    expect((await patchTask(taskId, MEMBER, { orderDate: "2030-01-01" })).status).toBe(200);
+    // A date change can't smuggle in a forbidden field.
+    expect((await patchTask(taskId, MEMBER, { dueDate: "2030-01-02", title: "Renamed" })).status).toBe(403);
     expect((await patchTask(taskId, MEMBER, { title: "Renamed" })).status).toBe(403);
     // Mixing an allowed field with a forbidden one is still refused.
     expect((await patchTask(taskId, MEMBER, { status: "done", priority: "urgent" })).status).toBe(403);

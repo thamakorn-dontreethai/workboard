@@ -120,6 +120,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
   // The API enforces the same rules — this just hides/disables what won't work.
   const canManage = canDo("manage", boardId);
   const canCreate = canDo("create", boardId);
+  const canSchedule = canDo("schedule", boardId);
   const [newRowTitles, setNewRowTitles] = useState<Record<string, string>>({});
   const [activeStatusPopoverTaskId, setActiveStatusPopoverTaskId] = useState<
     string | null
@@ -1163,7 +1164,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                           {showOrderDateColumn && (
                             <td className="px-3 py-1.5 border-l border-border/60">
                               <DatePicker
-                                disabled={!canManage}
+                                disabled={!canSchedule}
                                 currentDate={task.orderDate ?? null}
                                 onDateChange={(newDate) =>
                                   updateTaskField(task.id, "orderDate", newDate)
@@ -1176,7 +1177,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                           {showDateColumn && (
                             <td className="px-3 py-1.5 border-l border-border/60">
                               <DatePicker
-                                disabled={!canManage}
+                                disabled={!canSchedule}
                                 currentDate={task.dueDate}
                                 onDateChange={(newDate) =>
                                   updateTaskField(task.id, "dueDate", newDate)
