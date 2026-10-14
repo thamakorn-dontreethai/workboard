@@ -473,6 +473,7 @@ export function MondaySlideOver() {
                       currentAssigneeIds={task.assigneeIds}
                       onAssign={(newUids) => assignTask(task.id, newUids)}
                       boardId={task.boardId}
+                      task={task}
                       size="sm"
                     />
                   </div>
@@ -558,6 +559,14 @@ export function MondaySlideOver() {
                     placeholder="e.g. Marketing, Design"
                     className="w-full rounded-lg border border-zinc-700 bg-zinc-800/80 px-2.5 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
                   />
+                </div>
+
+                {/* Order Date */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-zinc-400">Order Date</label>
+                  <div className="rounded-lg border border-zinc-700/60 bg-zinc-800/50 px-2.5 py-1 text-xs font-medium text-zinc-200 text-center">
+                    {task.orderDate ? formatDate(task.orderDate) : "-"}
+                  </div>
                 </div>
 
                 {/* Due Date */}

@@ -141,6 +141,7 @@ export interface Task {
   priority: TaskPriority;
   assigneeIds: ID[];
   reporterId: ID;
+  orderDate?: Date | null;
   dueDate: Date | null;
   timeline?: { start: string; end: string } | null;
   category?: string; // e.g. "Design", "Marketing", "Operations", "Finance", "Strategy"

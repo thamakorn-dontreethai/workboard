@@ -304,10 +304,31 @@ describe("Role-based permissions", () => {
     expect(json.data.password).toBeUndefined();
   });
 
-  it("lets only leaders create, delete and organise work", async () => {
-    // Members can't create items, groups or boards.
-    const create = await postTasksRoute(call("/api/tasks", "POST", MEMBER, { title: "x", boardId, groupId }));
-    expect(create.status).toBe(403);
+  it("lets members create items and assign people", async () => {
+    const create = await postTasksRoute(
+      call("/api/tasks", "POST", MEMBER, { title: "x", boardId, groupId, assigneeIds: [OTHER_MEMBER] })
+    );
+    expect(create.status).toBe(201);
+    const created = (await create.json()).data;
+    expect(created.reporterId).toBe(MEMBER);
+    expect(created.assigneeIds).toEqual([OTHER_MEMBER]);
+
+    const reassign = await assignTaskRoute(
+      call(`/api/tasks/${created.id}/assign`, "POST", MEMBER, { assigneeIds: [MEMBER] }),
+      { params: Promise.resolve({ id: created.id }) }
+    );
+    expect(reassign.status).toBe(200);
+
+    // Any member can reassign, not just the one who created it.
+    const byOther = await assignTaskRoute(
+      call(`/api/tasks/${created.id}/assign`, "POST", OTHER_MEMBER, { assigneeIds: [OTHER_MEMBER] }),
+      { params: Promise.resolve({ id: created.id }) }
+    );
+    expect(byOther.status).toBe(200);
+  });
+
+  it("lets only leaders delete and organise work", async () => {
+    // Members can't create groups or boards.
     const group = await postGroupRoute(call("/api/groups", "POST", MEMBER, { boardId, name: "Mine" }));
     expect(group.status).toBe(403);
     const board = await postBoardsRoute(call("/api/boards", "POST", MEMBER, { name: "B", workspaceId: "ws-1" }));
@@ -336,20 +357,8 @@ describe("Role-based permissions", () => {
     expect(leaderDel.status).toBe(200);
   });
 
-  it("lets only leaders assign people and set priority / due date / title", async () => {
+  it("lets only leaders set priority / due date / title", async () => {
     const taskId = await newTask({ assigneeIds: [MEMBER] });
-
-    const assign = (as: string) =>
-      assignTaskRoute(call(`/api/tasks/${taskId}/assign`, "POST", as, { assigneeIds: [OTHER_MEMBER] }), {
-        params: Promise.resolve({ id: taskId }),
-      });
-    expect((await assign(MEMBER)).status).toBe(403);
-    expect((await assign(LEADER)).status).toBe(200);
-
-    // The member was just unassigned; put them back for the field checks.
-    await assignTaskRoute(call(`/api/tasks/${taskId}/assign`, "POST", LEADER, { assigneeIds: [MEMBER] }), {
-      params: Promise.resolve({ id: taskId }),
-    });
 
     expect((await patchTask(taskId, MEMBER, { priority: "urgent" })).status).toBe(403);
     expect((await patchTask(taskId, MEMBER, { dueDate: "2030-01-01" })).status).toBe(403);

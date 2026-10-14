@@ -14,7 +14,7 @@ export async function POST(
       : body.assigneeId
         ? [body.assigneeId]
         : [];
-    const auth = await authorizeTask(request, id, "manage");
+    const auth = await authorizeTask(request, id, "assign");
     if (!auth.ok) return auth.response;
 
     const updated = await assignTask(id, assigneeIds, auth.userId);

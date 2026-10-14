@@ -41,6 +41,9 @@ export async function PATCH(
     if (body.dueDate !== undefined) {
       updates.dueDate = body.dueDate ? new Date(body.dueDate) : null;
     }
+    if (body.orderDate !== undefined) {
+      updates.orderDate = body.orderDate ? new Date(body.orderDate) : null;
+    }
 
     const updated = await updateTask(id, updates, auth.userId);
     if (!updated) {

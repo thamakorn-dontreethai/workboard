@@ -5,11 +5,14 @@ import { useWorkBoard } from "@/lib/context/WorkBoardContext";
 import { Check, UserX, Search, ChevronDown, User as UserIcon, UserPlus } from "lucide-react";
 import { FloatingPanel } from "@/components/board/FloatingPanel";
 import { getBoardMemberIds } from "@/lib/utils/boardMembers";
+import type { Task } from "@/types";
 
 interface AssigneeSelectProps {
   currentAssigneeIds: string[];
   onAssign: (userIds: string[]) => void;
   boardId?: string;
+  // The item being edited (omitted in the create form).
+  task?: Task;
   size?: "sm" | "md" | "lg";
   align?: "left" | "right";
   showLabel?: boolean;
@@ -20,6 +23,7 @@ export function AssigneeSelect({
   currentAssigneeIds,
   onAssign,
   boardId,
+  task,
   size = "md",
   align = "left",
   showLabel = true,
@@ -30,9 +34,9 @@ export function AssigneeSelect({
   const [search, setSearch] = useState("");
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // Assigning work is leader-only. Members still see who it's assigned to,
-  // but the picker won't open (the API refuses it too).
-  const isReadOnly = disabled || (Boolean(boardId) && !canDo("manage", boardId!));
+  // Leaders and members may assign people; viewers only see who it's
+  // assigned to (the API refuses it too).
+  const isReadOnly = disabled || (Boolean(boardId) && !canDo("assign", boardId!, task));
 
   const currentAssignees = currentAssigneeIds
     .map((id) => users.find((u) => u.id === id))

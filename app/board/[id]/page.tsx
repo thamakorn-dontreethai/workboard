@@ -153,6 +153,7 @@ export default function BoardPage() {
   // Creating items/groups, renaming and inviting are leader-only (the API
   // enforces it too); members work through status updates and comments.
   const canManage = canDo("manage", board.id);
+  const canCreate = canDo("create", board.id);
 
   const boardMemberIds = getBoardMemberIds(board, workspaces);
   const boardMembers = users.filter((u) => boardMemberIds.includes(u.id));
@@ -209,8 +210,10 @@ export default function BoardPage() {
   // flow if the board has no group yet to put it in.
   const handleQuickAddItem = () => {
     const targetGroupId = boardGroups[0]?.id;
-    if (!targetGroupId) {
-      openCreateTaskModal(board.id, undefined);
+    // Quick-add makes a placeholder "New item" to rename inline, which only
+    // leaders can do — members get the full form instead.
+    if (!targetGroupId || !canManage) {
+      openCreateTaskModal(board.id, targetGroupId);
       return;
     }
     createTask({
@@ -295,7 +298,7 @@ export default function BoardPage() {
         {/* Left: Gray "New item ▾" Button — clicking the label adds an
             item immediately; the chevron is a separate click target that
             opens the "New group of items" menu. */}
-        <div className={`flex items-center gap-2 ${canManage ? "" : "hidden"}`}>
+        <div className={`flex items-center gap-2 ${canCreate ? "" : "hidden"}`}>
           <div className="flex items-center rounded-lg bg-gradient-to-r from-[#0073ea] to-[#0060c0] hover:from-[#0084ff] hover:to-[#0073ea] text-white text-xs font-semibold shadow-md shadow-[#0073ea]/20 hover:shadow-lg hover:shadow-[#0073ea]/40 ring-1 ring-white/10 transition-all duration-200 overflow-hidden">
             <button
               type="button"
@@ -337,6 +340,7 @@ export default function BoardPage() {
               <Plus className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span>New item (with details)</span>
             </button>
+            {canManage && (
             <button
               type="button"
               onClick={() => {
@@ -350,6 +354,7 @@ export default function BoardPage() {
               <Rows2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span>New group of items</span>
             </button>
+            )}
           </FloatingPanel>
         </div>
 
@@ -628,6 +633,7 @@ export default function BoardPage() {
               [
                 { id: "person", label: "Person" },
                 { id: "status", label: "Status" },
+                { id: "orderDate", label: "Order Date" },
                 { id: "date", label: "Date" },
               ] as { id: MondayTableColumn; label: string }[]
             ).map((col) => {

@@ -7,14 +7,16 @@ import type { Board, Task, Workspace } from "@/types";
 //   member  = ordinary workspace member (or added to the board)
 //   viewer  = read-only workspace member
 //
-//   manage  (leader only): create/delete items, assign people, priority, due
-//           date, title/description, groups, boards, invitations
+//   manage  (leader only): delete items, priority, due date,
+//           title/description, groups, boards, invitations
+//   create  (leader, member): add new items (choosing who works on them)
+//   assign  (leader, member): set who works on an item
 //   write   (leader, member): comment, attach files, use the checklist
 //   status  (leader, or a member on an item assigned to them): change status
 //   view    (anyone on the board, incl. viewers): harmless per-user tweaks
 //           such as collapsing a group
 export type BoardRole = "leader" | "member" | "viewer";
-export type BoardAction = "manage" | "write" | "status" | "view";
+export type BoardAction = "manage" | "create" | "assign" | "write" | "status" | "view";
 
 export function resolveBoardRole(
   userId: string,
@@ -41,7 +43,7 @@ export function roleCan(
   if (role === "leader") return true;
   if (action === "view") return role !== null;
   if (role === "member") {
-    if (action === "write") return true;
+    if (action === "write" || action === "create" || action === "assign") return true;
     if (action === "status") return Boolean(task && userId && task.assigneeIds?.includes(userId));
   }
   return false;

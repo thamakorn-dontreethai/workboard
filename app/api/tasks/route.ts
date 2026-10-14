@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const auth = await authorizeBoard(request, body.boardId, "manage");
+    const auth = await authorizeBoard(request, body.boardId, "create");
     if (!auth.ok) return auth.response;
 
     const newTask = await createTask({
@@ -45,6 +45,7 @@ export async function POST(request: Request) {
           : undefined,
       priority: body.priority,
       status: body.status,
+      orderDate: body.orderDate ? new Date(body.orderDate) : null,
       dueDate: body.dueDate ? new Date(body.dueDate) : null,
       category: body.category,
       reporterId: auth.userId,

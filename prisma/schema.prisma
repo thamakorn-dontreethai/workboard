@@ -188,6 +188,8 @@ model Task {
   reporterId  String
   reporter    User       @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
   dueDate     DateTime?
+  // วันที่สั่งงาน — set by the leader when creating the item.
+  orderDate   DateTime?
   // Set once a "due soon" LINE/notification reminder has fired for the
   // task's current dueDate, so the periodic checker doesn't re-notify on
   // every poll. Cleared whenever dueDate changes (see updateTask).

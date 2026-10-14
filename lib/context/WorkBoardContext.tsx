@@ -139,6 +139,7 @@ interface WorkBoardContextType {
     assigneeIds?: string[];
     priority?: TaskPriority;
     status?: TaskStatus;
+    orderDate?: Date | null;
     dueDate?: Date | null;
     category?: string;
     timeline?: { start: string; end: string } | null;
@@ -570,6 +571,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
           applyIfChanged("tasks", tasksRes.data, setTasks, (d) =>
             d.map((t: Task) => ({
               ...t,
+              orderDate: t.orderDate ? new Date(t.orderDate) : null,
               dueDate: t.dueDate ? new Date(t.dueDate) : null,
               createdAt: new Date(t.createdAt),
               updatedAt: new Date(t.updatedAt),
@@ -1489,6 +1491,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       assigneeIds?: string[];
       priority?: TaskPriority;
       status?: TaskStatus;
+      orderDate?: Date | null;
       dueDate?: Date | null;
       category?: string;
       timeline?: { start: string; end: string } | null;
@@ -1523,6 +1526,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
         priority: newTaskData.priority || "medium",
         assigneeIds: newTaskData.assigneeIds || [],
         reporterId: currentUser.id,
+        orderDate: newTaskData.orderDate || null,
         dueDate: newTaskData.dueDate || null,
         category: newTaskData.category || "General",
         timeline: newTaskData.timeline || null,
@@ -1568,6 +1572,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
             assigneeIds: newTaskData.assigneeIds || [],
             priority: newTaskData.priority || "medium",
             status,
+            orderDate: newTaskData.orderDate || null,
             dueDate: newTaskData.dueDate || null,
             category: newTaskData.category || "General",
             reporterId: currentUser.id,
@@ -1593,6 +1598,7 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       // the UI doesn't regress while that's still a gap.
       const newTask: Task = {
         ...result.data,
+        orderDate: result.data.orderDate ? new Date(result.data.orderDate) : null,
         dueDate: result.data.dueDate ? new Date(result.data.dueDate) : null,
         createdAt: new Date(result.data.createdAt),
         updatedAt: new Date(result.data.updatedAt),
@@ -2557,10 +2563,10 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
 
   const openCreateTaskModal = useCallback(
     (boardId?: string, groupId?: string, defaultDueDate?: Date | null) => {
-      // Creating items is leader-only; don't open a form that will be refused.
+      // Leaders and members may create items; don't open a form that will be refused.
       const allowed = boardId
-        ? canDo("manage", boardId)
-        : boards.some((b) => canDo("manage", b.id));
+        ? canDo("create", boardId)
+        : boards.some((b) => canDo("create", b.id));
       if (!allowed) return;
       setCreateTaskDefaultBoardId(boardId);
       setCreateTaskDefaultGroupId(groupId);

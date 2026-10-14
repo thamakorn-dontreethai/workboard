@@ -36,7 +36,7 @@ import {
 export const UNASSIGNED_FILTER_ID = "__unassigned__";
 
 export type MondayTableSortBy = "manual" | "dueDate" | "priority" | "status" | "title";
-export type MondayTableColumn = "person" | "status" | "date";
+export type MondayTableColumn = "person" | "status" | "orderDate" | "date";
 
 export interface MondayTableFilters {
   searchQuery: string;
@@ -119,6 +119,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
   // (owner/admin); members can still update status on items assigned to them.
   // The API enforces the same rules — this just hides/disables what won't work.
   const canManage = canDo("manage", boardId);
+  const canCreate = canDo("create", boardId);
   const [newRowTitles, setNewRowTitles] = useState<Record<string, string>>({});
   const [activeStatusPopoverTaskId, setActiveStatusPopoverTaskId] = useState<
     string | null
@@ -240,7 +241,8 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
   // notices, matching monday.com's behavior. Reuses the same inline-rename
   // mechanism as clicking any task's title.
   useEffect(() => {
-    if (!lastCreatedTaskId) return;
+    // Members can't rename items, so don't drop them into a title field.
+    if (!lastCreatedTaskId || !canManage) return;
     const created = tasks.find((t) => t.id === lastCreatedTaskId);
     if (created) {
       setEditingTaskId(created.id);
@@ -586,9 +588,13 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
 
   const showPersonColumn = !filters.hiddenColumns.has("person");
   const showStatusColumn = !filters.hiddenColumns.has("status");
+  const showOrderDateColumn = !filters.hiddenColumns.has("orderDate");
   const showDateColumn = !filters.hiddenColumns.has("date");
   const visibleOptionalColumnCount =
-    Number(showPersonColumn) + Number(showStatusColumn) + Number(showDateColumn);
+    Number(showPersonColumn) +
+    Number(showStatusColumn) +
+    Number(showOrderDateColumn) +
+    Number(showDateColumn);
 
   return (
     <div className="space-y-8 pb-16 select-none font-sans">
@@ -992,6 +998,11 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                           Status
                         </th>
                       )}
+                      {showOrderDateColumn && (
+                        <th className="px-3 py-2 w-36 text-center text-muted-foreground font-medium border-l border-border">
+                          Order Date
+                        </th>
+                      )}
                       {showDateColumn && (
                         <th className="px-3 py-2 w-36 text-center text-muted-foreground font-medium border-l border-border">
                           Date
@@ -1127,6 +1138,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                                   currentAssigneeIds={task.assigneeIds}
                                   onAssign={(newUids) => assignTask(task.id, newUids)}
                                   boardId={boardId}
+                                  task={task}
                                   size="sm"
                                   showLabel={false}
                                 />
@@ -1142,6 +1154,19 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                                 currentStatus={task.status}
                                 onStatusChange={(newStatus) =>
                                   updateTaskStatus(task.id, newStatus)
+                                }
+                              />
+                            </td>
+                          )}
+
+                          {/* Order date */}
+                          {showOrderDateColumn && (
+                            <td className="px-3 py-1.5 border-l border-border/60">
+                              <DatePicker
+                                disabled={!canManage}
+                                currentDate={task.orderDate ?? null}
+                                onDateChange={(newDate) =>
+                                  updateTaskField(task.id, "orderDate", newDate)
                                 }
                               />
                             </td>
@@ -1167,7 +1192,7 @@ export function MondayTable({ boardId, filters: filtersProp }: MondayTableProps)
                     })}
 
                     {/* Inline "+ Add item" Row */}
-                    {canManage && (
+                    {canCreate && (
 <tr className="bg-transparent hover:bg-accent/30 transition-colors">
                       <td
                         className="w-1.5 p-0"

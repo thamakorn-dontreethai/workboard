@@ -218,6 +218,7 @@ export function TaskModal() {
                   currentAssigneeIds={task.assigneeIds}
                   onAssign={(newUids) => assignTask(task.id, newUids)}
                   boardId={task.boardId}
+                  task={task}
                   size="md"
                 />
               </div>

@@ -123,6 +123,7 @@ export function readDb(): DatabaseSchema {
       groups: data.groups || MOCK_GROUPS,
       tasks: (data.tasks || []).map((t: any) => ({
         ...t,
+        orderDate: t.orderDate ? new Date(t.orderDate) : null,
         dueDate: t.dueDate ? new Date(t.dueDate) : null,
         createdAt: new Date(t.createdAt),
         updatedAt: new Date(t.updatedAt),
@@ -1232,6 +1233,7 @@ export async function getTasks(filter?: {
         priority: (t.priority as any) || "medium",
         assigneeIds: t.assigneeIds,
         reporterId: t.reporterId,
+        orderDate: t.orderDate,
         dueDate: t.dueDate,
         category: t.category,
         tags: [],
@@ -1293,6 +1295,7 @@ export async function getTaskById(id: string): Promise<Task | undefined> {
           priority: (t.priority as any) || "medium",
           assigneeIds: t.assigneeIds,
           reporterId: t.reporterId,
+          orderDate: t.orderDate,
           dueDate: t.dueDate,
           category: t.category,
           tags: [],
@@ -1322,6 +1325,7 @@ export async function createTask(data: {
   assigneeIds?: string[];
   priority?: TaskPriority;
   status?: TaskStatus;
+  orderDate?: Date | null;
   dueDate?: Date | null;
   category?: string;
   reporterId?: string;
@@ -1369,6 +1373,7 @@ export async function createTask(data: {
     priority: data.priority || "medium",
     assigneeIds: data.assigneeIds || [],
     reporterId: data.reporterId || db.users[0]?.id || "user-somchai",
+    orderDate: data.orderDate || null,
     dueDate: data.dueDate || null,
     category: data.category || "General",
     tags: [],
@@ -1407,6 +1412,7 @@ export async function createTask(data: {
           priority: newTask.priority,
           assigneeIds: newTask.assigneeIds,
           reporterId: newTask.reporterId,
+          orderDate: newTask.orderDate,
           dueDate: newTask.dueDate,
           category: newTask.category,
           order: newTask.order,
@@ -1449,6 +1455,7 @@ export async function updateTask(
       | "description"
       | "status"
       | "priority"
+      | "orderDate"
       | "dueDate"
       | "category"
       | "groupId"
@@ -1476,6 +1483,7 @@ export async function updateTask(
             dueSoonReminderSentAt: null,
             overdueReminderSentAt: null,
           } as any),
+          ...(updates.orderDate !== undefined && { orderDate: updates.orderDate }),
           ...(updates.category && { category: updates.category }),
           ...(updates.groupId && { groupId: updates.groupId }),
           ...(updates.order !== undefined && { order: updates.order }),
@@ -1513,6 +1521,7 @@ export async function updateTask(
         priority: (updated.priority as any) || "medium",
         assigneeIds: updated.assigneeIds,
         reporterId: updated.reporterId,
+        orderDate: updated.orderDate,
         dueDate: updated.dueDate,
         category: updated.category,
         tags: [],
@@ -1663,6 +1672,7 @@ export async function assignTask(
         priority: (updated.priority as any) || "medium",
         assigneeIds: updated.assigneeIds,
         reporterId: updated.reporterId,
+        orderDate: updated.orderDate,
         dueDate: updated.dueDate,
         category: updated.category,
         tags: [],

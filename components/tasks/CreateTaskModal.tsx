@@ -6,6 +6,23 @@ import { TaskPriority, TASK_PRIORITY_CONFIG } from "@/types";
 import { X, Plus, Calendar, AlertCircle } from "lucide-react";
 import { AssigneeSelect } from "@/components/common/AssigneeSelect";
 
+function toDateInputValue(d: Date) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// Open the calendar on a click anywhere in the field, not just on the tiny
+// browser icon.
+function openNativePicker(e: React.MouseEvent<HTMLInputElement>) {
+  try {
+    e.currentTarget.showPicker();
+  } catch {
+    // Unsupported / not allowed here — the native icon still works.
+  }
+}
+
 export function CreateTaskModal() {
   const {
     isCreateTaskOpen,
@@ -20,11 +37,11 @@ export function CreateTaskModal() {
     openTaskModal,
   } = useWorkBoard();
 
-  // Creating items is leader-only, so only boards the person manages are choices.
+  // Only boards the person may add items to (leaders and members) are choices.
   // Memoised: it's a dependency of the reset effect below, and a fresh array
   // on every render would re-run it (wiping the form) on each keystroke.
   const boards = useMemo(
-    () => allBoards.filter((b) => canDo("manage", b.id)),
+    () => allBoards.filter((b) => canDo("create", b.id)),
     [allBoards, canDo]
   );
 
@@ -34,6 +51,7 @@ export function CreateTaskModal() {
   const [groupId, setGroupId] = useState("");
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [orderDateStr, setOrderDateStr] = useState("");
   const [dueDateStr, setDueDateStr] = useState("");
 
   useEffect(() => {
@@ -46,12 +64,9 @@ export function CreateTaskModal() {
       setGroupId(createTaskDefaultGroupId || availableGroups[0]?.id || "");
       setAssigneeIds([]);
       setPriority("medium");
+      setOrderDateStr(toDateInputValue(new Date()));
       if (createTaskDefaultDueDate) {
-        const d = new Date(createTaskDefaultDueDate);
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, "0");
-        const dd = String(d.getDate()).padStart(2, "0");
-        setDueDateStr(`${yyyy}-${mm}-${dd}`);
+        setDueDateStr(toDateInputValue(new Date(createTaskDefaultDueDate)));
       } else {
         setDueDateStr("");
       }
@@ -87,6 +102,7 @@ export function CreateTaskModal() {
         groupId,
         assigneeIds,
         priority,
+        orderDate: orderDateStr ? new Date(orderDateStr) : null,
         dueDate: dueDateStr ? new Date(dueDateStr) : null,
       });
 
@@ -243,26 +259,34 @@ export function CreateTaskModal() {
             </div>
           </div>
 
-          {/* Due date */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground">
-              Due Date
-            </label>
-            <input
-              type="date"
-              value={dueDateStr}
-              onChange={(e) => setDueDateStr(e.target.value)}
-              // Open the calendar on a click anywhere in the field, not just
-              // on the tiny browser icon.
-              onClick={(e) => {
-                try {
-                  e.currentTarget.showPicker();
-                } catch {
-                  // Unsupported / not allowed here — the native icon still works.
-                }
-              }}
-              className="w-full cursor-pointer rounded-xl border border-border bg-background px-3.5 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:[color-scheme:dark]"
-            />
+          {/* Order date & Due date */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Order Date
+              </label>
+              <input
+                type="date"
+                value={orderDateStr}
+                onChange={(e) => setOrderDateStr(e.target.value)}
+                onClick={openNativePicker}
+                className="w-full cursor-pointer rounded-xl border border-border bg-background px-3.5 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:[color-scheme:dark]"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Due Date
+              </label>
+              <input
+                type="date"
+                value={dueDateStr}
+                min={orderDateStr || undefined}
+                onChange={(e) => setDueDateStr(e.target.value)}
+                onClick={openNativePicker}
+                className="w-full cursor-pointer rounded-xl border border-border bg-background px-3.5 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:[color-scheme:dark]"
+              />
+            </div>
           </div>
 
           {/* Actions */}
