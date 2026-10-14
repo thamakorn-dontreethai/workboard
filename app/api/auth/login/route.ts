@@ -47,7 +47,7 @@ export async function POST(request: Request) {
             message: "Login successful",
             data: safeUser,
           });
-          setSessionCookie(response, user.id, rememberMe);
+          setSessionCookie(response, user.id, rememberMe, user.isAuditor);
           return response;
         }
       } catch (e) {

@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { getWorkspaces, createWorkspace } from "@/lib/server/db";
 import { requireSession } from "@/lib/server/permissions";
+import { getSession } from "@/lib/server/session";
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const userId = searchParams.get("userId") || undefined;
+    // A read-only admin session sees every workspace, not just its own.
+    const userId = getSession(request)?.readOnly
+      ? undefined
+      : searchParams.get("userId") || undefined;
     const workspaces = await getWorkspaces(userId);
     return NextResponse.json({
       success: true,

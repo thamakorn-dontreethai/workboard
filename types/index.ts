@@ -15,6 +15,8 @@ export interface User {
   role: string;
   department?: string;
   isActive: boolean;
+  // Read-only admin who can look at every workspace (see proxy.ts).
+  isAuditor?: boolean;
   // Per-type opt-out switches for Posts feed notifications; undefined is
   // treated as "on" (matches the DB default) rather than "off".
   notifyPostLikes?: boolean;

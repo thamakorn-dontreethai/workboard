@@ -22,8 +22,11 @@ export type BoardAction = "manage" | "create" | "assign" | "schedule" | "write" 
 export function resolveBoardRole(
   userId: string,
   board: Pick<Board, "ownerId" | "memberIds">,
-  workspace: Pick<Workspace, "members"> | undefined | null
+  workspace: Pick<Workspace, "members"> | undefined | null,
+  // Read-only admin: a viewer on every board, even ones they belong to.
+  isAuditor = false
 ): BoardRole | null {
+  if (isAuditor) return "viewer";
   if (board.ownerId === userId) return "leader";
   const membership = workspace?.members.find((m) => m.userId === userId);
   if (membership) {

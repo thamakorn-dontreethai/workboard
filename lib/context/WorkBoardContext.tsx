@@ -1051,9 +1051,14 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
       const ws =
         workspaces.find((w) => w.id === board.workspaceId) ??
         (workspace.id === board.workspaceId ? workspace : undefined);
-      return roleCan(resolveBoardRole(currentUser.id, board, ws), action, task, currentUser.id);
+      return roleCan(
+        resolveBoardRole(currentUser.id, board, ws, currentUser.isAuditor),
+        action,
+        task,
+        currentUser.id
+      );
     },
-    [boards, workspaces, workspace, currentUser.id]
+    [boards, workspaces, workspace, currentUser.id, currentUser.isAuditor]
   );
 
   const isWorkspaceLeader = workspace.members.some(

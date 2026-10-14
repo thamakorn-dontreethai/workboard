@@ -5,8 +5,9 @@ import type { NextResponse } from "next/server";
 // only in the browser (localStorage), so no API route could tell who was
 // calling — every route just believed whatever user id the client sent.
 //
-// Token = base64url(JSON{uid, exp}) + "." + HMAC-SHA256(payload, secret).
-// Tampering with the user id or expiry invalidates the signature.
+// Token = base64url(JSON{uid, exp, ro?}) + "." + HMAC-SHA256(payload, secret).
+// Tampering with the user id, expiry or read-only flag invalidates the
+// signature. `ro` marks a read-only admin session (see proxy.ts).
 
 export const SESSION_COOKIE = "wb_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
@@ -27,15 +28,27 @@ function sign(payload: string): string {
   return crypto.createHmac("sha256", getSecret()).update(payload).digest("base64url");
 }
 
-export function createSessionToken(userId: string, now = Date.now(), ttl = SESSION_TTL_SECONDS): string {
+export function createSessionToken(
+  userId: string,
+  now = Date.now(),
+  ttl = SESSION_TTL_SECONDS,
+  readOnly = false
+): string {
   const payload = Buffer.from(
-    JSON.stringify({ uid: userId, exp: Math.floor(now / 1000) + ttl })
+    JSON.stringify({ uid: userId, exp: Math.floor(now / 1000) + ttl, ...(readOnly && { ro: true }) })
   ).toString("base64url");
   return `${payload}.${sign(payload)}`;
 }
 
 // Returns the user id if the token is genuine and unexpired, else null.
 export function verifySessionToken(token: string | undefined | null, now = Date.now()): string | null {
+  return readSessionToken(token, now)?.uid ?? null;
+}
+
+export function readSessionToken(
+  token: string | undefined | null,
+  now = Date.now()
+): { uid: string; readOnly: boolean } | null {
   if (!token) return null;
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return null;
@@ -46,10 +59,10 @@ export function verifySessionToken(token: string | undefined | null, now = Date.
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
 
   try {
-    const { uid, exp } = JSON.parse(Buffer.from(payload, "base64url").toString());
+    const { uid, exp, ro } = JSON.parse(Buffer.from(payload, "base64url").toString());
     if (typeof uid !== "string" || typeof exp !== "number") return null;
     if (exp * 1000 < now) return null;
-    return uid;
+    return { uid, readOnly: ro === true };
   } catch {
     return null;
   }
@@ -57,18 +70,27 @@ export function verifySessionToken(token: string | undefined | null, now = Date.
 
 // Reads the session from the request's Cookie header.
 export function getSessionUserId(request: Request): string | null {
+  return getSession(request)?.uid ?? null;
+}
+
+export function getSession(request: Request): { uid: string; readOnly: boolean } | null {
   const header = request.headers.get("cookie");
   if (!header) return null;
   for (const part of header.split(";")) {
     const [name, ...rest] = part.trim().split("=");
-    if (name === SESSION_COOKIE) return verifySessionToken(rest.join("="));
+    if (name === SESSION_COOKIE) return readSessionToken(rest.join("="));
   }
   return null;
 }
 
-export function setSessionCookie(response: NextResponse, userId: string, rememberMe = true): void {
+export function setSessionCookie(
+  response: NextResponse,
+  userId: string,
+  rememberMe = true,
+  readOnly = false
+): void {
   const ttl = rememberMe ? SESSION_TTL_SECONDS : SESSION_SHORT_TTL_SECONDS;
-  response.cookies.set(SESSION_COOKIE, createSessionToken(userId, Date.now(), ttl), {
+  response.cookies.set(SESSION_COOKIE, createSessionToken(userId, Date.now(), ttl, readOnly), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

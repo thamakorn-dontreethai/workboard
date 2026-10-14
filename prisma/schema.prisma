@@ -45,6 +45,10 @@ model User {
   avatarUrl      String?        @db.Text
   role           String         @default("Member")
   isActive       Boolean        @default(true)
+  // Read-only admin: sees every workspace but can't change anything (writes
+  // are refused in proxy.ts). Only set by scripts/create-auditor.ts — there
+  // is deliberately no API or UI that can turn it on.
+  isAuditor      Boolean        @default(false)
   // Per-type opt-out switches for the Posts feed's notifications — each
   // defaults on so existing users keep getting notified until they turn
   // one off, rather than silently missing activity after this shipped.

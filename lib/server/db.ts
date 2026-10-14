@@ -490,6 +490,7 @@ type UserRow = {
   hasAvatar: boolean;
   role: string;
   isActive: boolean;
+  isAuditor: boolean;
   notifyPostLikes: boolean;
   notifyPostComments: boolean;
   notifyNewPosts: boolean;
@@ -497,7 +498,7 @@ type UserRow = {
 };
 
 const USER_COLUMNS = Prisma.sql`
-  u.id, u.name, u.email, u."avatarInitials", u."avatarColor", u.role, u."isActive",
+  u.id, u.name, u.email, u."avatarInitials", u."avatarColor", u.role, u."isActive", u."isAuditor",
   u."notifyPostLikes", u."notifyPostComments", u."notifyNewPosts", u."updatedAt",
   (u."avatarUrl" IS NOT NULL) AS "hasAvatar"
 `;
@@ -516,6 +517,7 @@ function mapUserRow(u: UserRow): User {
       : null,
     role: u.role,
     isActive: u.isActive,
+    isAuditor: u.isAuditor,
     notifyPostLikes: u.notifyPostLikes,
     notifyPostComments: u.notifyPostComments,
     notifyNewPosts: u.notifyNewPosts,
@@ -526,7 +528,7 @@ export async function getUsers(): Promise<User[]> {
   if (isPrismaEnabled) {
     try {
       const rows = await prisma.$queryRaw<UserRow[]>`
-        SELECT ${USER_COLUMNS} FROM "User" u WHERE u."isActive" = true
+        SELECT ${USER_COLUMNS} FROM "User" u WHERE u."isActive" = true AND u."isAuditor" = false
       `;
       // An empty array is a legitimate answer, not a signal to fall back.
       return rows.map(mapUserRow);
