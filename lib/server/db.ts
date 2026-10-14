@@ -1482,6 +1482,7 @@ export async function updateTask(
             dueDate: updates.dueDate,
             dueSoonReminderSentAt: null,
             overdueReminderSentAt: null,
+            dayBeforeReminderSentAt: null,
           } as any),
           ...(updates.orderDate !== undefined && { orderDate: updates.orderDate }),
           ...(updates.category && { category: updates.category }),
@@ -1746,10 +1747,15 @@ export async function assignTask(
 export async function deleteTask(id: string): Promise<boolean> {
   if (isPrismaEnabled) {
     try {
-      await prisma.task.update({
-        where: { id },
-        data: { isArchived: true, archivedAt: new Date() },
-      });
+      // A real delete — the UI already says "This can't be undone" and there
+      // is no bin to restore from, so archiving only left dead rows filling
+      // the database. Subtasks, comments and activities cascade with the
+      // task; notifications only hold a plain taskId, so they go explicitly.
+      await prisma.$transaction([
+        prisma.notification.deleteMany({ where: { taskId: id } }),
+        prisma.task.delete({ where: { id } }),
+      ]);
+      return true;
     } catch (e) {
       console.warn("Prisma deleteTask fallback:", e);
     }
@@ -1765,9 +1771,8 @@ export async function deleteTask(id: string): Promise<boolean> {
 }
 
 // ─── Retention: permanently clear the bin ───────────────────────────────────
-// "Delete" in this app archives rather than removes (see deleteTask /
-// deleteBoard), which is what makes an undo possible but also means nothing
-// ever leaves the tables. This drops the rows that have sat archived past
+// Deleting a board archives rather than removes (see deleteBoard), and tasks
+// used to as well, so archived rows would otherwise never leave the tables. This drops the rows that have sat archived past
 // the retention window for good.
 //
 // It is a real delete, and the schema cascades: removing a task takes its
@@ -3307,8 +3312,9 @@ export async function checkAndSendAppointmentReminders(
   return { remindedAppointments, notifications: createdNotifications };
 }
 
-// Two independent one-time nudges per task — in-app + LINE for whoever has
+// Three independent one-time nudges per task — in-app + LINE for whoever has
 // it linked:
+//   0. "Due tomorrow" — fires on the calendar day before the due date.
 //   1. "Due today"  — fires once the CALENDAR DATE the task is due arrives
 //      (compared in Asia/Bangkok, not a rolling N-hours-before countdown —
 //      that's what people actually mean by "due the 23rd").
@@ -3368,7 +3374,7 @@ async function runTaskReminderPass(
   now: Date,
   todayKey: string,
   opts: {
-    gateField: "dueSoonReminderSentAt" | "overdueReminderSentAt";
+    gateField: "dueSoonReminderSentAt" | "overdueReminderSentAt" | "dayBeforeReminderSentAt";
     matchesDay: (dueDateKey: string, todayKey: string) => boolean;
     buildTitle: (title: string) => string;
     buildBody: (dueLabel: string) => string;
@@ -3378,12 +3384,11 @@ async function runTaskReminderPass(
     statusNote?: string;
   }
 ): Promise<{ remindedTaskIds: string[]; notifications: Notification[] }> {
-  // Loose SQL prefilter (anything due up through "end of today, Bangkok
-  // time") — the precise same-day/before-today split happens in JS below
-  // via bangkokDateKey, since Prisma can't compare calendar days in a
-  // specific timezone directly.
-  const startOfTomorrowBangkokUTC = new Date(
-    new Date(`${todayKey}T00:00:00+07:00`).getTime() + 24 * 60 * 60 * 1000
+  // Loose SQL prefilter (anything due up through "end of tomorrow, Bangkok
+  // time") — the precise day split happens in JS below via bangkokDateKey,
+  // since Prisma can't compare calendar days in a specific timezone directly.
+  const startOfDayAfterTomorrowBangkokUTC = new Date(
+    new Date(`${todayKey}T00:00:00+07:00`).getTime() + 2 * 24 * 60 * 60 * 1000
   );
 
   const allCandidates = await prisma.task.findMany({
@@ -3391,7 +3396,7 @@ async function runTaskReminderPass(
       boardId: { in: boardIds },
       isArchived: false,
       status: { notIn: ["done", "cancelled"] },
-      dueDate: { not: null, lt: startOfTomorrowBangkokUTC },
+      dueDate: { not: null, lt: startOfDayAfterTomorrowBangkokUTC },
       ...({ [opts.gateField]: null } as any),
     },
     include: { board: { select: { name: true } } },
@@ -3407,6 +3412,10 @@ async function runTaskReminderPass(
 
   const remindedTaskIds: string[] = [];
   const createdNotifications: Notification[] = [];
+  // Awaited before returning: on serverless (the daily cron especially) the
+  // function can be frozen as soon as the response goes out, which would
+  // silently drop any LINE push still in flight.
+  const lineSends: Promise<unknown>[] = [];
 
   for (const task of candidates) {
     const claim = await prisma.task.updateMany({
@@ -3450,7 +3459,7 @@ async function runTaskReminderPass(
 
       const lineUserId = (user as any).lineUserId;
       if (lineUserId) {
-        sendLineTaskNotification(lineUserId, {
+        lineSends.push(sendLineTaskNotification(lineUserId, {
           headerColor: opts.headerColor,
           headerLabel: opts.headerLabel,
           emoji: opts.emoji,
@@ -3460,13 +3469,14 @@ async function runTaskReminderPass(
           statusNote: opts.statusNote,
           link: buildTaskLink(task.id),
           altText: `${opts.headerLabel}: ${task.title}`,
-        }).catch(() => {});
+        }).catch(() => {}));
       }
     }
 
     remindedTaskIds.push(task.id);
   }
 
+  await Promise.all(lineSends);
   return { remindedTaskIds, notifications: createdNotifications };
 }
 
@@ -3484,8 +3494,18 @@ export async function checkAndSendTaskDueSoonReminders(
 
   const now = new Date();
   const todayKey = bangkokDateKey(now);
+  const tomorrowKey = bangkokDateKey(new Date(now.getTime() + 24 * 60 * 60 * 1000));
 
-  const [dueSoon, overdue] = await Promise.all([
+  const [dayBefore, dueSoon, overdue] = await Promise.all([
+    runTaskReminderPass(boardIds, now, todayKey, {
+      gateField: "dayBeforeReminderSentAt",
+      matchesDay: (dueKey) => dueKey === tomorrowKey,
+      buildTitle: (title) => `Due tomorrow: ${title}`,
+      buildBody: (dueLabel) => `Due ${dueLabel}`,
+      headerColor: "#0EA5E9",
+      headerLabel: "ครบกำหนดส่งพรุ่งนี้",
+      emoji: "🔔",
+    }),
     runTaskReminderPass(boardIds, now, todayKey, {
       gateField: "dueSoonReminderSentAt",
       matchesDay: (dueKey, today) => dueKey === today,
@@ -3508,9 +3528,25 @@ export async function checkAndSendTaskDueSoonReminders(
   ]);
 
   return {
-    remindedTaskIds: [...dueSoon.remindedTaskIds, ...overdue.remindedTaskIds],
-    notifications: [...dueSoon.notifications, ...overdue.notifications],
+    remindedTaskIds: [...dayBefore.remindedTaskIds, ...dueSoon.remindedTaskIds, ...overdue.remindedTaskIds],
+    notifications: [...dayBefore.notifications, ...dueSoon.notifications, ...overdue.notifications],
   };
+}
+
+// The daily cron's entry point: the same three passes for every workspace,
+// so reminders go out even when nobody has the app open.
+export async function checkAndSendTaskDueRemindersForAllWorkspaces(): Promise<{
+  workspaces: number;
+  remindedTaskIds: string[];
+}> {
+  if (!isPrismaEnabled) return { workspaces: 0, remindedTaskIds: [] };
+  const workspaces = await prisma.workspace.findMany({ select: { id: true } });
+  const remindedTaskIds: string[] = [];
+  for (const w of workspaces) {
+    const result = await checkAndSendTaskDueSoonReminders(w.id);
+    remindedTaskIds.push(...result.remindedTaskIds);
+  }
+  return { workspaces: workspaces.length, remindedTaskIds };
 }
 
 // ─── Dashboards (saved analytics report views over a workspace) ───────────

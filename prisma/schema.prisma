@@ -200,6 +200,9 @@ model Task {
   // due-soon nudge already fired earlier for the same dueDate. Cleared
   // whenever dueDate changes, same as dueSoonReminderSentAt.
   overdueReminderSentAt DateTime?
+  // Gate for the "due tomorrow" heads-up sent the day before dueDate.
+  // Cleared whenever dueDate changes, same as the two above.
+  dayBeforeReminderSentAt DateTime?
   category    String     @default("General")
   order       Int        @default(0)
   // Set when the row is soft-deleted, so the retention job knows how long

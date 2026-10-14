@@ -29,22 +29,18 @@ function parseOptions(url: URL) {
   };
 }
 
-// GET only ever reports; it cannot delete. Handy for checking what the next
-// run would clear.
+// Vercel Cron always calls with GET, so GET has to do the real purge — it
+// used to be report-only, which meant the scheduled job never deleted
+// anything. Pass ?dryRun=true to only see what the next run would clear.
 export async function GET(request: Request) {
-  if (!isAuthorized(request)) {
-    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-  }
-  try {
-    const { retentionDays } = parseOptions(new URL(request.url));
-    const result = await purgeArchived({ retentionDays, dryRun: true });
-    return NextResponse.json({ success: true, data: result });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
+  return run(request);
 }
 
 export async function POST(request: Request) {
+  return run(request);
+}
+
+async function run(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
