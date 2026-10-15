@@ -138,14 +138,15 @@ export function DatePicker({ currentDate, onDateChange, disabled = false }: Date
 
           {/* Calendar grid */}
           <div className="grid grid-cols-7 gap-1">
-            {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((day) => (
+            {/* Sunday-first to match getDay() (0 = Sunday) used for the padding above */}
+            {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
               <div key={day} className="text-center text-xs font-semibold text-zinc-500 py-1">
                 {day}
               </div>
             ))}
             {days.map((day, idx) => {
               const isTodayCell = day && day.toDateString() === new Date().toDateString();
-              const isSelectedCell = day && day.getDate() === viewDate.getDate() && isSameMonth;
+              const isSelectedCell = day && isSameMonth && day.getDate() === currentDate!.getDate();
               return (
                 <button
                   key={idx}
