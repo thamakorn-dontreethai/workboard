@@ -1189,6 +1189,10 @@ export async function getTasks(filter?: {
     try {
       const where = {
         isArchived: false,
+        // Deleting a board only archives it (its tasks stay as they were
+        // until purgeArchived removes the board and they cascade with it), so
+        // filter on the board too — otherwise those tasks linger in My Work.
+        board: { isArchived: false },
         ...(filter?.boardId && { boardId: filter.boardId }),
         ...(filter?.groupId && { groupId: filter.groupId }),
         ...(filter?.assigneeId && { assigneeIds: { has: filter.assigneeId } }),
