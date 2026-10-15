@@ -4,7 +4,7 @@ import {
   checkAndSendTaskDueRemindersForAllWorkspaces,
 } from "@/lib/server/db";
 
-// GET is the daily Vercel Cron run (01:00 UTC = 08:00 Bangkok, see
+// GET is the daily Vercel Cron run (00:00 UTC = 07:00 Bangkok, see
 // vercel.json): every workspace, so reminders reach LINE even when nobody
 // has the app open. Vercel sends `Authorization: Bearer $CRON_SECRET`.
 // POST stays as the open app's 30-second nudge for its own workspace.

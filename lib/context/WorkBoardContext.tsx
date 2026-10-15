@@ -2464,10 +2464,11 @@ export function WorkBoardProvider({ children }: { children: React.ReactNode }) {
   // ─── Workspace Appointment Reminders ───────────────────────────────────
   // Unlike personal to-dos, appointments are shared — the server creates a
   // Notification row + sends an email for every attendee, not just this
-  // client's user. There's no cron in this app, so any authenticated client
-  // with a workspace open periodically asks the server "is anything due?";
-  // the server-side claim in checkAndSendAppointmentReminders keeps two
-  // clients polling at once from double-sending. This tab still merges its
+  // client's user. A cron covers the case where nobody has the app open; on
+  // top of that, any authenticated client with a workspace open periodically
+  // asks the server "is anything due?" — the server-side claim in
+  // checkAndSendAppointmentReminders keeps overlapping callers from
+  // double-sending. This tab still merges its
   // own resulting notifications in immediately for instant feedback.
   useEffect(() => {
     if (!isAuthenticated || !currentUser?.id || !workspace.id) return;

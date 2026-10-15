@@ -3203,9 +3203,10 @@ export async function deleteAppointment(id: string): Promise<boolean> {
 
 // Finds appointments in this workspace whose reminder window has arrived,
 // fires an in-app Notification + email to every attendee, and marks each
-// one sent so it isn't repeated. There's no cron in this app, so this runs
-// whenever a client with this workspace open polls for it; the reminderSentAt
-// claim (via updateMany) keeps two clients polling at once from double-sending.
+// one sent so it isn't repeated. Runs from the every-few-minutes cron (see
+// checkAndSendAppointmentRemindersForAllWorkspaces) and whenever a client
+// with this workspace open polls for it; the reminderSentAt claim (via
+// updateMany) keeps overlapping callers from double-sending.
 export async function checkAndSendAppointmentReminders(
   workspaceId: string
 ): Promise<{ remindedAppointments: WorkspaceAppointment[]; notifications: Notification[] }> {
@@ -3237,6 +3238,10 @@ export async function checkAndSendAppointmentReminders(
 
   const remindedAppointments: WorkspaceAppointment[] = [];
   const createdNotifications: Notification[] = [];
+  // Awaited before returning, same as the task reminders: on serverless the
+  // function can be frozen once the response goes out, dropping any email
+  // or LINE push still in flight.
+  const sends: Promise<unknown>[] = [];
 
   for (const appt of due) {
     // Atomically claim this appointment so a second client polling at the
@@ -3284,26 +3289,26 @@ export async function checkAndSendAppointmentReminders(
         console.warn("Failed to create appointment notification:", e);
       }
 
-      sendAppointmentReminderEmail({
+      sends.push(sendAppointmentReminderEmail({
         to: user.email,
         recipientName: user.name,
         workspaceName: workspaceRow.name,
         title: appt.title,
         notes: appt.notes || undefined,
         startAt: appt.startAt,
-      }).catch((e) => console.warn("Failed to send appointment reminder email:", e));
+      }).catch((e) => console.warn("Failed to send appointment reminder email:", e)));
 
       // Same reminder over LINE, for attendees who linked their account.
       // Skipped silently for everyone else, exactly like the task reminders.
       const lineUserId = (user as any).lineUserId as string | null;
       if (lineUserId) {
-        sendLineAppointmentReminder(lineUserId, {
+        sends.push(sendLineAppointmentReminder(lineUserId, {
           title: appt.title,
           dateLabel,
           timeRangeLabel,
           workspaceName: workspaceRow.name,
           notes: appt.notes || undefined,
-        }).catch((e) => console.warn("Failed to send appointment LINE reminder:", e));
+        }).catch((e) => console.warn("Failed to send appointment LINE reminder:", e)));
       }
     }
 
@@ -3311,7 +3316,28 @@ export async function checkAndSendAppointmentReminders(
     if (updated) remindedAppointments.push(mapAppointmentRow(updated));
   }
 
+  await Promise.all(sends);
   return { remindedAppointments, notifications: createdNotifications };
+}
+
+// The cron's entry point: only workspaces that actually have an unsent,
+// not-completed appointment, so the every-few-minutes run stays cheap.
+export async function checkAndSendAppointmentRemindersForAllWorkspaces(): Promise<{
+  workspaces: number;
+  remindedAppointmentIds: string[];
+}> {
+  if (!isPrismaEnabled) return { workspaces: 0, remindedAppointmentIds: [] };
+  const pending = await prisma.appointment.findMany({
+    where: { isCompleted: false, reminderSentAt: null },
+    select: { workspaceId: true },
+    distinct: ["workspaceId"],
+  });
+  const remindedAppointmentIds: string[] = [];
+  for (const { workspaceId } of pending) {
+    const result = await checkAndSendAppointmentReminders(workspaceId);
+    remindedAppointmentIds.push(...result.remindedAppointments.map((a) => a.id));
+  }
+  return { workspaces: pending.length, remindedAppointmentIds };
 }
 
 // Three independent one-time nudges per task — in-app + LINE for whoever has
