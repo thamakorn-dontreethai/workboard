@@ -1254,7 +1254,15 @@ export async function getTasks(filter?: {
   }
 
   const db = readDb();
-  let result = db.tasks.filter((t) => !t.isArchived);
+  // Older rows in the JSON fallback predate multi-assignee and still carry a
+  // single `assigneeId`; normalize so callers can rely on assigneeIds.
+  let result = db.tasks
+    .filter((t) => !t.isArchived)
+    .map((t) => {
+      if (Array.isArray(t.assigneeIds)) return t;
+      const legacyId = (t as any).assigneeId as string | null | undefined;
+      return { ...t, assigneeIds: legacyId ? [legacyId] : [] };
+    });
 
   if (filter?.boardId) {
     result = result.filter((t) => t.boardId === filter.boardId);
